@@ -38,7 +38,42 @@
 -- para chamadas diretas à Data API. Exceção deliberada: quando a própria
 -- organização está sendo apagada (ON DELETE CASCADE das memberships), a
 -- remoção é permitida.
+--
+-- Correção (Fiscal R2, achado 4): o `FOR UPDATE` sozinho (ver função abaixo)
+-- reduz a janela de corrida mas não evita deadlock — quando duas transações
+-- removem/rebaixam owners DISTINTOS da mesma organização, cada UPDATE/DELETE
+-- já trava sua própria linha (OLD) antes do trigger BEFORE ROW rodar; ao
+-- tentar o `FOR UPDATE` na linha do outro owner, cada transação espera a
+-- outra, que por sua vez espera a primeira — deadlock. Postgres aborta uma
+-- das duas (nunca as duas commitam, então a integridade nunca foi violada),
+-- mas isso ainda é uma falha operacional evitável, não só tolerável. Um
+-- gatilho BEFORE STATEMENT roda antes de qualquer linha ser travada pelo
+-- UPDATE/DELETE em si; um advisory lock ali serializa as duas transações
+-- ANTES de qualquer uma travar sua própria linha, eliminando o deadlock
+-- (a segunda espera a primeira terminar, sem ciclo de espera possível).
 -- ============================================================
+
+-- ponytail: lock global (não por organização) — trata todas as orgs como
+-- uma fila só. Suficiente para o volume de alterações de owner do MVP;
+-- trocar por advisory lock por organization_id (ex.: hashtext do uuid) se
+-- isso virar gargalo real de throughput.
+create or replace function factory.serialize_owner_changes()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtext('factory.memberships:protect_last_owner'));
+  return null;
+end;
+$$;
+
+revoke all on function factory.serialize_owner_changes() from public;
+
+create trigger memberships_serialize_owner_changes
+before update or delete on factory.memberships
+for each statement execute function factory.serialize_owner_changes();
 
 drop policy "admins manage memberships" on factory.memberships;
 
@@ -92,11 +127,13 @@ begin
       return case when tg_op = 'DELETE' then old else new end;
     end if;
 
-    -- FOR UPDATE: sem lock, duas remoções/rebaixamentos concorrentes de
-    -- owners distintos (mesma organização) cada uma veria a outra ainda
-    -- não commitada como "owner restante" e ambas passariam, zerando os
-    -- owners (Fiscal R1, achado 2). O lock serializa: a segunda transação
-    -- espera a primeira commitar e reavalia o estado já atualizado.
+    -- FOR UPDATE: a serialização real contra corrida entre transações
+    -- concorrentes é o advisory lock do gatilho BEFORE STATEMENT acima
+    -- (memberships_serialize_owner_changes), que roda antes de qualquer
+    -- linha ser travada pelo UPDATE/DELETE — por isso não deadlocka. Este
+    -- FOR UPDATE aqui é redundante mas inofensivo com o advisory lock já
+    -- ativo (nunca vai encontrar contenção real); mantido como defesa em
+    -- profundidade caso o advisory lock seja removido no futuro.
     if not exists (
       select 1 from factory.memberships
        where organization_id = old.organization_id
