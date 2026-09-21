@@ -36,11 +36,17 @@ jobs:
       - name: Verificar se há toolchain Node para os scripts adicionais
         id: guard
         run: |
-          if [ -f package.json ]; then
+          # package.json sozinho não basta: package.json existe desde o
+          # Sprint 1.1 (Fase 1), mas os scripts/db/*.ts abaixo nunca foram
+          # escritos — checar só package.json fazia este guard achar que
+          # existiam e quebrar com ERR_MODULE_NOT_FOUND. Mesma classe de
+          # bug já corrigida em intelligence-ci.yml: checar os arquivos
+          # específicos, não um proxy que parou de significar a mesma coisa.
+          if [ -f package.json ] && [ -f scripts/db/test-rollback.ts ] && [ -f scripts/db/assert-rls-enabled.ts ] && [ -f scripts/db/assert-invariants.ts ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::package.json ausente — scripts/db/{test-rollback,assert-rls-enabled,assert-invariants}.ts são Fase 1 (ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md). As migrations e supabase test db acima já rodaram de verdade."
+            echo "::notice::scripts/db/{test-rollback,assert-rls-enabled,assert-invariants}.ts ainda não existem. As migrations e supabase test db acima já rodaram de verdade; estes scripts adicionais entram quando forem escritos."
           fi
 
       - uses: pnpm/action-setup@v4
