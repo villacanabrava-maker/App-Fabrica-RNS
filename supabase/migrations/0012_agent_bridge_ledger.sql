@@ -181,6 +181,51 @@ begin
 end;
 $$;
 
-grant execute on function integration.agent_bridge_upsert(text,text,text,bigint,bigint,text,text,text,text,text,integer,text,text,bigint,text,text) to anon;
-grant execute on function integration.agent_bridge_get(text,text) to anon;
+create or replace function public.agent_bridge_upsert(
+  p_bridge_secret text,
+  p_request_id text,
+  p_repository text,
+  p_thread_number bigint,
+  p_source_comment_id bigint,
+  p_source_comment_url text,
+  p_base_sha text,
+  p_actor text,
+  p_request_text text,
+  p_status text,
+  p_attempt integer default 0,
+  p_answer text default null,
+  p_openai_response_id text default null,
+  p_github_comment_id bigint default null,
+  p_github_comment_url text default null,
+  p_error text default null
+)
+returns jsonb
+language sql
+security definer
+set search_path = ''
+as $
+  select integration.agent_bridge_upsert(
+    p_bridge_secret, p_request_id, p_repository, p_thread_number,
+    p_source_comment_id, p_source_comment_url, p_base_sha, p_actor,
+    p_request_text, p_status, p_attempt, p_answer, p_openai_response_id,
+    p_github_comment_id, p_github_comment_url, p_error
+  );
+$;
+
+create or replace function public.agent_bridge_get(
+  p_bridge_secret text,
+  p_request_id text
+)
+returns jsonb
+language sql
+security definer
+set search_path = ''
+as $
+  select integration.agent_bridge_get(p_bridge_secret, p_request_id);
+$;
+
+grant execute on function public.agent_bridge_upsert(text,text,text,bigint,bigint,text,text,text,text,text,integer,text,text,bigint,text,text) to anon;
+grant execute on function public.agent_bridge_get(text,text) to anon;
+revoke all on function integration.agent_bridge_upsert(text,text,text,bigint,bigint,text,text,text,text,text,integer,text,text,bigint,text,text) from public;
+revoke all on function integration.agent_bridge_get(text,text) from public;
 revoke all on function integration.agent_bridge_assert_secret(text) from public;
