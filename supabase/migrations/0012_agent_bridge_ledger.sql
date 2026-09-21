@@ -203,14 +203,14 @@ returns jsonb
 language sql
 security definer
 set search_path = ''
-as $
+as $fn$
   select integration.agent_bridge_upsert(
     p_bridge_secret, p_request_id, p_repository, p_thread_number,
     p_source_comment_id, p_source_comment_url, p_base_sha, p_actor,
     p_request_text, p_status, p_attempt, p_answer, p_openai_response_id,
     p_github_comment_id, p_github_comment_url, p_error
   );
-$;
+$fn$;
 
 create or replace function public.agent_bridge_get(
   p_bridge_secret text,
@@ -220,9 +220,9 @@ returns jsonb
 language sql
 security definer
 set search_path = ''
-as $
+as $fn$
   select integration.agent_bridge_get(p_bridge_secret, p_request_id);
-$;
+$fn$;
 
 grant execute on function public.agent_bridge_upsert(text,text,text,bigint,bigint,text,text,text,text,text,integer,text,text,bigint,text,text) to anon;
 grant execute on function public.agent_bridge_get(text,text) to anon;
