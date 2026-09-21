@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/task-packet.schema.json",
+  "title": "RNS Task Packet",
+  "description": "A ordem de serviço imutável entregue a um agente. Substitui o prompt livre.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "task_id", "run_id", "role", "runtime",
+    "repository", "base_sha", "objective", "acceptance_criteria",
+    "allowed_paths", "forbidden_paths", "required_skills",
+    "required_evidence", "permissions", "budget",
+    "expected_artifacts", "expected_output_schema",
+    "intelligence_version", "correlation_id", "idempotency_key"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+
+    "mission_id": { "type": ["string", "null"], "minLength": 1 },
+    "stage_id":   { "type": ["string", "null"], "minLength": 1 },
+    "task_id":    { "type": "string", "minLength": 1 },
+    "run_id":     { "type": "string", "minLength": 1 },
+
+    "role":    { "enum": ["R1","R2","R3","R4","R5","R6","R7","R8","R9"] },
+    "runtime": { "enum": ["openai","anthropic","antigravity","deterministic","mock"] },
+    "model":   {
+      "type": ["string", "null"],
+      "description": "SEMPRE null no envelope. Resolvido em runtime a partir de models.yaml."
+    },
+
+    "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+    "base_sha":   { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "branch":     { "type": ["string", "null"] },
+
+    "objective": { "type": "string", "minLength": 10, "maxLength": 2000 },
+
+    "acceptance_criteria": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 3 },
+      "minItems": 1
+    },
+
+    "allowed_paths":   { "type": "array", "items": { "type": "string" } },
+    "forbidden_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Sempre inclui forbidden_paths_always de permissions.yaml."
+    },
+
+    "required_skills":   { "type": "array", "items": { "type": "string" } },
+    "required_evidence": {
+      "type": "array",
+      "items": {
+        "enum": ["code","test","ci","runtime","browser","database","external_source","human"]
+      }
+    },
+    "required_tests": { "type": "array", "items": { "type": "string" } },
+
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filesystem","github","supabase","vercel","network","production"],
+      "properties": {
+        "filesystem": { "enum": ["read_only","workspace_write","test_workspace"] },
+        "github":     { "enum": ["none","read","branch_write","pr_review"] },
+        "supabase":   { "enum": ["none","metadata_read","schema_read","preview_read","preview_read_write","preview_only"] },
+        "vercel":     { "enum": ["none","preview_read","preview","logs_read"] },
+        "network":    { "enum": ["none","restricted","package_registries","preview_only","broad"] },
+        "production": { "const": "deny" }
+      }
+    },
+
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_cost_usd","max_wall_seconds","max_review_hops"],
+      "properties": {
+        "max_cost_usd":     { "type": ["number","null"], "minimum": 0 },
+        "max_wall_seconds": { "type": ["integer","null"], "minimum": 1 },
+        "max_review_hops":  { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+
+    "review_policy": {
+      "type": ["object","null"],
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "type": "array",
+          "items": { "enum": ["openai_r1","claude_r1","openai_r2","claude_r2"] },
+          "maxItems": 4
+        },
+        "human_gate_after": { "type": "string" }
+      }
+    },
+
+    "context_refs": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "prior_round_id":  { "type": ["string","null"] },
+        "prior_artifacts": { "type": "array", "items": { "type": "string" } },
+        "spec_version":    { "type": ["integer","null"] },
+        "plan_version":    { "type": ["integer","null"] },
+        "preview_url":     { "type": ["string","null"] }
+      }
+    },
+
+    "expected_artifacts":     { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "expected_output_schema": { "type": "string", "minLength": 1 },
+
+    "intelligence_version": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "correlation_id":       { "type": "string", "minLength": 1 },
+    "idempotency_key":      { "type": "string", "minLength": 1 }
+  }
+}

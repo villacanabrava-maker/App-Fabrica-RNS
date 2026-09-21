@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/handoff.schema.json",
+  "title": "RNS Handoff",
+  "description": "Passagem de bastão entre runtimes. Sempre mediada pelo Orchestrator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_id","task_id","from_runtime","to_runtime",
+    "hop","reason","input_sha","artifact_ids","next_action","idempotency_key"
+  ],
+  "properties": {
+    "handoff_id": { "type": "string" },
+    "mission_id": { "type": ["string","null"] },
+    "task_id":    { "type": "string" },
+
+    "from_runtime": { "enum": ["human","antigravity","openai","anthropic","orchestrator","mock"] },
+    "to_runtime":   { "enum": ["human","antigravity","openai","anthropic","orchestrator","mock"] },
+
+    "hop": {
+      "type": "integer", "minimum": 0, "maximum": 4,
+      "description": "hop 5 é rejeitado. O ciclo termina em 4."
+    },
+
+    "reason":    { "type": "string", "minLength": 5 },
+    "input_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+
+    "artifact_ids": { "type": "array", "items": { "type": "string" } },
+    "finding_ids":  { "type": "array", "items": { "type": "string" } },
+
+    "next_action":     { "type": "string", "minLength": 5 },
+    "idempotency_key": { "type": "string", "minLength": 1 }
+  }
+}

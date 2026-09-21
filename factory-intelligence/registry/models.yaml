@@ -1,0 +1,54 @@
+# ============================================================
+# RNS Models
+#
+# ★ NENHUM nome de modelo aparece em código da aplicação.
+# A interface de Configurações lista apenas as chaves habilitadas.
+# Digitar nome de modelo em texto livre é PROIBIDO.
+#
+# Os valores abaixo permanecem UNSPECIFIED até a Fase 2,
+# quando serão preenchidos com os modelos efetivamente contratados.
+# Inventar um nome aqui cria uma constante falsa.
+# ============================================================
+version: 1
+registry: rns-models
+
+models:
+  - key: mock-deterministic
+    runtime: mock
+    model: deterministic-fixture
+    enabled: true
+    notes: 'Fase 1.'
+
+  - key: openai-primary
+    runtime: openai
+    model: UNSPECIFIED
+    enabled: false
+    intended_use: [implementation, review]
+    notes: 'Preencher na Fase 2 após verificar a documentação oficial.'
+
+  - key: openai-light
+    runtime: openai
+    model: UNSPECIFIED
+    enabled: false
+    intended_use: [documentation, simple_fix]
+
+  - key: anthropic-primary
+    runtime: anthropic
+    model: UNSPECIFIED
+    enabled: false
+    intended_use: [implementation, review, security]
+
+  - key: anthropic-deep
+    runtime: anthropic
+    model: UNSPECIFIED
+    enabled: false
+    intended_use: [architecture, deep_analysis]
+    notes: 'Custo maior. Usar apenas quando a complexidade justificar.'
+
+# Política de verificação
+freshness_policy:
+  rule: revalidate_before_material_use
+  applies_to: [model_names, pricing, context_limits, capabilities]
+  reason: >-
+    Modelos e preços mudam. A fábrica memoriza COMO reverificar,
+    não os valores em si.

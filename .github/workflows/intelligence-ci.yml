@@ -1,0 +1,69 @@
+name: Intelligence CI
+
+on:
+  pull_request:
+    paths:
+      - 'factory-intelligence/**'
+      - '.agents/**'
+      - '.claude/**'
+      - '.codex/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'scripts/intelligence/**'
+
+permissions:
+  contents: read
+
+jobs:
+  detect-app:
+    name: detect-app
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::package.json ausente — a Fase 1 (app funcional) ainda não foi implementada, ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md. Este workflow passa a validar de verdade assim que a Fase 1 adicionar os scripts em scripts/intelligence/."
+          fi
+
+  validate:
+    name: validate
+    needs: detect-app
+    if: needs.detect-app.outputs.exists == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validar JSON Schemas
+        run: pnpm tsx scripts/intelligence/validate-schemas.ts
+
+      - name: Validar registries YAML
+        run: pnpm tsx scripts/intelligence/validate-registry.ts
+
+      - name: Reconstruir projeções
+        run: pnpm tsx scripts/intelligence/build-projections.ts
+
+      # ★ O coração deste workflow.
+      # Falha se alguém editou .agents/skills ou .claude/skills à mão,
+      # ou se a projeção divergiu da fonte canônica.
+      - name: Detectar drift das projeções
+        run: pnpm tsx scripts/intelligence/check-drift.ts
+
+      - name: Validar fixtures contra os schemas
+        run: pnpm tsx scripts/intelligence/validate-fixtures.ts
+
+      - name: Evals de fumaça das skills alteradas
+        run: pnpm tsx scripts/intelligence/run-evals.ts --changed-only

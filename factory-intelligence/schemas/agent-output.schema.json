@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/agent-output.schema.json",
+  "title": "RNS Agent Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id","run_id","input_sha","status","summary",
+    "artifacts","finding_ids","evidence_ids","usage"
+  ],
+  "properties": {
+    "task_id":    { "type": "string" },
+    "run_id":     { "type": "string" },
+    "input_sha":  { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "output_sha": { "type": ["string","null"], "pattern": "^[0-9a-f]{40}$" },
+
+    "status": { "enum": ["completed","changes_required","blocked","failed"] },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type","uri","sha256"],
+        "properties": {
+          "type":      { "enum": ["plan","patch","review","report","screenshot","log","test_result","diff"] },
+          "uri":       { "type": "string" },
+          "sha256":    { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "mime_type": { "type": ["string","null"] },
+          "size_bytes":{ "type": ["integer","null"], "minimum": 0 }
+        }
+      }
+    },
+
+    "modified_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Validado contra allowed_paths e forbidden_paths antes do consumo."
+    },
+
+    "finding_ids":  { "type": "array", "items": { "type": "string" } },
+    "evidence_ids": { "type": "array", "items": { "type": "string" } },
+
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens":        { "type": ["integer","null"], "minimum": 0 },
+        "cached_input_tokens": { "type": ["integer","null"], "minimum": 0 },
+        "output_tokens":       { "type": ["integer","null"], "minimum": 0 },
+        "session_hours":       { "type": ["number","null"],  "minimum": 0 },
+        "cost_usd":            { "type": ["number","null"],  "minimum": 0 },
+        "wall_ms":             { "type": ["integer","null"], "minimum": 0 }
+      }
+    },
+
+    "blocked_reason": { "type": ["string","null"] }
+  }
+}

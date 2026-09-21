@@ -1,1 +1,62 @@
+# ============================================================
+# CODEOWNERS — Fábrica Apps RNS
+#
+# ATENÇÃO: CODEOWNERS sozinho NÃO bloqueia merge.
+# É obrigatório ativar "Require review from Code Owners"
+# no ruleset da branch main.
+#
+# Hoje o repositório tem um único humano responsável
+# (@villacanabrava-maker). Os caminhos abaixo preservam a
+# estrutura de propriedade por área prevista em
+# docs/06-INTELIGENCIA-DOS-AGENTES/ e docs/05-SEGURANCA/ para
+# quando equipes/times dedicados existirem no GitHub — troque
+# @villacanabrava-maker pelo time real (ex.: @org/ai-platform)
+# assim que ele for criado.
+# ============================================================
+
+# Dono padrão — cobre qualquer caminho não listado abaixo
 * @villacanabrava-maker
+
+# Constituição e autoridade humana
+/factory-intelligence/constitution/          @villacanabrava-maker
+
+# Registries, protocolos e permissões
+/factory-intelligence/registry/              @villacanabrava-maker
+/factory-intelligence/protocols/             @villacanabrava-maker
+/factory-intelligence/schemas/               @villacanabrava-maker
+
+# Inteligência executável — skills são instruções de agente
+/factory-intelligence/skills/                @villacanabrava-maker
+/factory-intelligence/methodology/           @villacanabrava-maker
+
+# Projeções geradas — não devem ser editadas à mão
+/.agents/                                    @villacanabrava-maker
+/.claude/                                    @villacanabrava-maker
+/.codex/                                     @villacanabrava-maker
+
+# Bootloaders
+/AGENTS.md                                   @villacanabrava-maker
+/CLAUDE.md                                   @villacanabrava-maker
+
+# Automação privilegiada
+/.github/workflows/                          @villacanabrava-maker
+/.github/CODEOWNERS                          @villacanabrava-maker
+/scripts/intelligence/                       @villacanabrava-maker
+
+# Orchestrator e adapters
+/apps/orchestrator-worker/                   @villacanabrava-maker
+/packages/policy-engine/                     @villacanabrava-maker
+/packages/review-engine/                     @villacanabrava-maker
+/packages/agent-adapters/                    @villacanabrava-maker
+/packages/state-machines/                    @villacanabrava-maker
+
+# Banco
+/supabase/migrations/                        @villacanabrava-maker
+/supabase/functions/                         @villacanabrava-maker
+/supabase/tests/                             @villacanabrava-maker
+
+# Release
+/factory-intelligence/methodology/RELEASE.md @villacanabrava-maker
+
+# Documentação mestre
+/docs/                                       @villacanabrava-maker

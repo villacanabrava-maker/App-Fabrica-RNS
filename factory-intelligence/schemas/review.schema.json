@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/review.schema.json",
+  "title": "RNS Review",
+  "description": "Uma passagem do ciclo de revisão dupla.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "review_id","task_id","review_cycle_id","reviewer_runtime",
+    "reviewer_role","round","target_sha","verdict",
+    "finding_ids","unresolved_finding_ids","summary"
+  ],
+  "properties": {
+    "review_id":       { "type": "string" },
+    "task_id":         { "type": "string" },
+    "review_cycle_id": { "type": "string" },
+
+    "reviewer_runtime": { "enum": ["openai","anthropic","antigravity","human","mock"] },
+    "reviewer_role":    { "enum": ["R2","R3","R5","R6","R7","R8","R9"] },
+
+    "round": {
+      "type": "integer", "minimum": 1, "maximum": 4,
+      "description": "Rodada GLOBAL do ciclo (1..4). round > 4 é DENIED."
+    },
+
+    "target_sha":     { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "prior_review_id":{ "type": ["string","null"] },
+
+    "comments_on_prior_work": {
+      "type": "boolean",
+      "description": "Obrigatoriamente true nas rodadas 2, 3 e 4."
+    },
+
+    "verdict": {
+      "enum": ["APPROVE_AI_STAGE","CHANGES_REQUIRED","BLOCKED","READY_FOR_HUMAN_APPROVAL"],
+      "description": "READY_FOR_HUMAN_APPROVAL só é permitido na rodada 4."
+    },
+
+    "finding_ids":            { "type": "array", "items": { "type": "string" } },
+    "unresolved_finding_ids": { "type": "array", "items": { "type": "string" } },
+    "accepted_finding_ids":   { "type": "array", "items": { "type": "string" } },
+    "rejected_finding_ids":   { "type": "array", "items": { "type": "string" } },
+    "disagreement_ids":       { "type": "array", "items": { "type": "string" } },
+
+    "summary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "conditions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Condições a cumprir quando o verdict é READY com ressalvas."
+    },
+    "residual_risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "round": { "minimum": 2 } }, "required": ["round"] },
+      "then": { "properties": { "comments_on_prior_work": { "const": true } },
+                "required": ["comments_on_prior_work"] }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "READY_FOR_HUMAN_APPROVAL" } },
+              "required": ["verdict"] },
+      "then": { "properties": { "round": { "const": 4 } }, "required": ["round"] }
+    }
+  ]
+}

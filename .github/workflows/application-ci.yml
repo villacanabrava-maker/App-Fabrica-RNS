@@ -1,0 +1,61 @@
+name: Application CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  detect-app:
+    name: detect-app
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::package.json ausente — a Fase 1 (app funcional) ainda não foi implementada, ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md. Este workflow passa a validar de verdade assim que a Fase 1 adicionar a aplicação."
+          fi
+
+  quality:
+    name: quality
+    needs: detect-app
+    if: needs.detect-app.outputs.exists == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # ★ Falha se encontrar padrão de segredo em variável pública.
+      - name: Verificar segredos em variáveis públicas
+        run: pnpm tsx scripts/check-public-env.ts
+
+      - name: Testes unitários
+        run: pnpm test:unit --coverage
+
+      - name: Testes de integração
+        run: pnpm test:integration
+
+      - name: Testes de componente e acessibilidade
+        run: pnpm test:storybook
+
+      - name: Build
+        run: pnpm build

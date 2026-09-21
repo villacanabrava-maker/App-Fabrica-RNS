@@ -1,0 +1,69 @@
+name: Database CI
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+
+permissions:
+  contents: read
+
+jobs:
+  migrations:
+    name: migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # ★ Estes três passos não dependem de Node/pnpm — só da CLI do
+      # Supabase — e por isso rodam sempre, mesmo antes da Fase 1
+      # trazer o toolchain da aplicação. São eles que validam de
+      # verdade as migrations e as policies de RLS que este repositório
+      # já contém; gatear o job inteiro atrás de package.json deixava
+      # este check verde sem checar nada.
+      - name: Subir stack local
+        run: supabase start
+
+      - name: Aplicar migrations do zero
+        run: supabase db reset
+
+      - name: Testes de RLS (inclui casos de NEGAÇÃO)
+        run: supabase test db
+
+      - name: Verificar se há toolchain Node para os scripts adicionais
+        id: guard
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::package.json ausente — scripts/db/{test-rollback,assert-rls-enabled,assert-invariants}.ts são Fase 1 (ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md). As migrations e supabase test db acima já rodaram de verdade."
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.guard.outputs.exists == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.exists == 'true'
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+        if: steps.guard.outputs.exists == 'true'
+
+      # ★ Migration que não reverte é migration perigosa.
+      - name: Testar reversão das migrations
+        if: steps.guard.outputs.exists == 'true'
+        run: pnpm tsx scripts/db/test-rollback.ts
+
+      # ★ Nenhuma tabela exposta pode ficar sem RLS.
+      - name: Verificar RLS habilitada em toda tabela exposta
+        if: steps.guard.outputs.exists == 'true'
+        run: pnpm tsx scripts/db/assert-rls-enabled.ts
+
+      # ★ Invariantes estruturais, incluindo approvals_must_be_human.
+      - name: Verificar invariantes de banco
+        if: steps.guard.outputs.exists == 'true'
+        run: pnpm tsx scripts/db/assert-invariants.ts
