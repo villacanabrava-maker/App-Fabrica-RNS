@@ -5,7 +5,7 @@
 -- fiscal_e2e3a330b5652c9b5bb3e602) na PR #5, antes de qualquer merge.
 -- ============================================================
 begin;
-select plan(10);
+select plan(11);
 
 insert into auth.users (id) values
   ('11111111-0000-0000-0000-000000000001'),
@@ -48,14 +48,42 @@ select isnt(
   'accepted_at já vem preenchido — o criador não fica em estado de convite pendente'
 );
 
--- ---------- 2. usuário anônimo/não autenticado não executa a função ----------
-set local role anon;
+-- Captura o id real da organização A enquanto ainda é visível (dono:
+-- role "authenticated", sem depender de qual claim "sub" está ativo —
+-- tabela temporária não é filtrada por RLS). Usado no teste 8: o
+-- ataque simulado é "usuário B conhece/adivinha o id de uma org que
+-- não é dele", não "usuário B tenta inserir um id que nem sequer
+-- consegue enxergar" — este segundo cenário testaria só a visibilidade
+-- via SELECT (já coberto no teste de isolamento), não a defesa real de
+-- WITH CHECK em INSERT.
+create temp table t_org_a as
+  select id from factory.organizations where slug = 'org-bootstrap-a';
+
+-- ---------- 2. usuário anônimo/não autenticado não executa a função (2 casos) ----------
+-- `anon` não tem `USAGE` no schema `factory` (0009_rls_policies.sql,
+-- "nunca concedido a anon: nenhuma policy deste arquivo é to anon") —
+-- bloqueado antes mesmo de a função rodar, com 42501 genérico de
+-- schema. Achado ao rodar `supabase test db` no Database CI: a
+-- expectativa original deste teste (a mensagem customizada da função)
+-- nunca é alcançada por um `anon` de verdade, porque o GRANT já barra
+-- antes. Corrigido para o erro real, e complementado pelo caso que a
+-- checagem interna da função de fato protege: um chamador com o
+-- privilégio de `authenticated` mas sem claim "sub" no JWT (auth.uid()
+-- nulo) — cenário que a Data API pode produzir e que `anon` sozinho
+-- não exercita.
+select throws_ok(
+  $$ select factory.create_organization('Organização Anônima', 'org-anon') $$,
+  '42501', null,
+  'anon não tem USAGE no schema factory — bloqueado antes de qualquer policy ou função'
+);
+
+set local role authenticated;
 select set_config('request.jwt.claims', '', true);
 
 select throws_ok(
-  $$ select factory.create_organization('Organização Anônima', 'org-anon') $$,
+  $$ select factory.create_organization('Organização Sem Claim', 'org-sem-claim') $$,
   null, 'create_organization requer um usuário autenticado',
-  'anon sem sessão não consegue criar organização (auth.uid() nulo -> exception)'
+  'authenticated sem claim "sub" (auth.uid() nulo) não consegue criar organização — guard interno da função'
 );
 
 -- ---------- 3. isolamento entre tenants ----------
@@ -74,12 +102,23 @@ select is(
 );
 
 -- ---------- 4. autoelevação em organização já existente continua bloqueada ----------
+-- ★ Achado ao rodar `supabase test db` no Database CI: a versão
+-- original deste teste buscava o organization_id via
+-- `select ... from factory.organizations where slug = ...`, mas essa
+-- leitura já é filtrada pela policy "members read own organization" —
+-- para o usuário B, org A é invisível, então o SELECT retornava 0
+-- linhas e o INSERT inseria 0 linhas: nenhuma exceção porque não havia
+-- linha nenhuma para violar o WITH CHECK, não porque a defesa
+-- funcionou. Corrigido para usar o id capturado em `t_org_a` (tabela
+-- temporária, não sujeita a RLS) — simula o cenário real que a policy
+-- "admins manage memberships" precisa cobrir: usuário B CONHECE (ou
+-- adivinha) o id de uma organização que não é dele.
 select throws_ok(
   $$ insert into factory.memberships (organization_id, user_id, role, accepted_at)
-     select o.id, '22222222-0000-0000-0000-000000000002', 'owner', now()
-     from factory.organizations o where o.slug = 'org-bootstrap-a' $$,
+     select id, '22222222-0000-0000-0000-000000000002', 'owner', now()
+     from t_org_a $$,
   '42501', null,
-  'usuário B não consegue se autoelevar a owner da organização A por insert direto — só via função'
+  'usuário B não consegue se autoelevar a owner da organização A por insert direto, mesmo sabendo o id — só via função'
 );
 
 -- ---------- 5. insert direto em organizations continua negado ----------
