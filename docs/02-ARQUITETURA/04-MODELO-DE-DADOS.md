@@ -58,6 +58,26 @@ created_at, updated_at
 unique (organization_id, user_id)
 ```
 
+### `invites`
+Convite pendente para um e-mail sem conta na Fábrica ainda. Entidade **separada** de `memberships` — decisão humana registrada na PR #5 (`[RNS-HUMAN-DECISION]`, subject=invite-schema): `memberships.user_id` permanece `not null`, não é relaxado para representar convidados. Um convite só vira `memberships` quando aceito (`factory.accept_invite`), na mesma transação que fecha o convite.
+```
+id uuid pk
+organization_id uuid fk not null
+email text not null                   -- normalizado (lower/trim)
+role membership_role not null         -- papel que a membership terá ao aceitar
+token_hash text not null unique       -- sha256 do token; o token em claro nunca é persistido
+status invite_status not null         -- pending|accepted|revoked|expired
+invited_by uuid fk users not null
+expires_at timestamptz not null
+revoked_at timestamptz
+revoked_by uuid fk users
+accepted_at timestamptz
+accepted_by uuid fk users
+created_at, updated_at
+unique (organization_id, lower(email)) where status = 'pending'
+```
+Sem policy de INSERT/UPDATE/DELETE direta — toda escrita passa por funções `SECURITY DEFINER` (`factory.create_invite`, `factory.revoke_invite`, `factory.accept_invite`), mesmo padrão de `factory.create_organization` (0014). `factory.get_invite_preview(token)` é a única leitura liberada a `anon` (só pelas colunas necessárias para a tela `/aceitar-convite`, nunca lista/enumera convites).
+
 ### `apps`  *(na UI: "Projetos")*
 ```
 id uuid pk
@@ -930,6 +950,7 @@ Fase 4. Estrutura detalhada em `06-INTELIGENCIA-DOS-AGENTES/06-EVALS.md`.
 
 ```sql
 create type membership_role as enum ('owner','admin','engineer','viewer');
+create type invite_status as enum ('pending','accepted','revoked','expired');
 create type app_status as enum ('planning','in_progress','in_review','paused','completed','archived');
 create type spec_status as enum ('draft','under_review','approved','superseded');
 create type environment_kind as enum ('preview','staging','production');
