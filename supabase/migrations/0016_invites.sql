@@ -264,8 +264,13 @@ begin
     raise exception 'convite inválido';
   end if;
 
+  -- Não persiste status = 'expired' aqui: o UPDATE seria desfeito junto
+  -- com a própria transação ao dar raise logo em seguida (Postgres não
+  -- distingue "commita isto, depois aborta"; sem autonomous transaction,
+  -- todo efeito da chamada é revertido quando a exceção sobe). expires_at
+  -- já é a fonte de verdade — quem lista convites deve tratar pending +
+  -- expires_at no passado como expirado, em vez de confiar só na coluna status.
   if v_invite.status = 'pending' and v_invite.expires_at < now() then
-    update factory.invites set status = 'expired', updated_at = now() where id = v_invite.id;
     raise exception 'convite expirado';
   end if;
 

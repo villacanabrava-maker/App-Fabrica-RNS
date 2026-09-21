@@ -282,11 +282,15 @@ select throws_ok(
   '31. convite com expires_at no passado é rejeitado'
 );
 
+-- Status permanece "pending": o UPDATE seria desfeito junto com o raise da
+-- própria chamada (sem autonomous transaction não dá pra persistir um e
+-- abortar o outro) — accept_invite não tenta mais escrever aqui.
+-- expires_at é a fonte de verdade para quem lista/decide sobre o convite.
 reset role;
 select is(
   (select status from factory.invites where id = 'e1000000-0000-0000-0000-000000000001'),
-  'expired'::invite_status,
-  '32. tentativa de aceite marca o convite expirado como "expired" no banco'
+  'pending'::invite_status,
+  '32. convite expirado permanece "pending" no banco (expires_at é a fonte de verdade, não a coluna status)'
 );
 
 -- ---------- já é membro (edge case: virou membro depois do convite ser criado) ----------
