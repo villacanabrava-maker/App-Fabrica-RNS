@@ -231,3 +231,6 @@ grant execute on function public.agent_bridge_get(text,text) to anon;
 revoke all on function integration.agent_bridge_upsert(text,text,text,bigint,bigint,text,text,text,text,text,integer,text,text,bigint,text,text) from public;
 revoke all on function integration.agent_bridge_get(text,text) from public;
 revoke all on function integration.agent_bridge_assert_secret(text) from public;
+revoke execute on function public.agent_bridge_upsert(text,text,text,bigint,bigint,text,text,text,text,text,integer,text,text,bigint,text,text) from authenticated;
+revoke execute on function public.agent_bridge_get(text,text) from authenticated;
+create index if not exists agent_handoff_events_request_id_idx on integration.agent_handoff_events(request_id);
