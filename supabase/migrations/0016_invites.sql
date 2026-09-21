@@ -120,8 +120,8 @@ begin
   end if;
 
   if not (
-    factory.user_has_role(p_organization_id, array['owner']::membership_role[])
-    or (factory.user_has_role(p_organization_id, array['admin']::membership_role[]) and p_role <> 'owner')
+    factory.user_has_role(p_organization_id, array['owner']::public.membership_role[])
+    or (factory.user_has_role(p_organization_id, array['admin']::public.membership_role[]) and p_role <> 'owner')
   ) then
     raise exception 'sem permissão para convidar com este papel nesta organização';
   end if;
@@ -189,8 +189,8 @@ begin
   end if;
 
   if not (
-    factory.user_has_role(v_invite.organization_id, array['owner']::membership_role[])
-    or (factory.user_has_role(v_invite.organization_id, array['admin']::membership_role[]) and v_invite.role <> 'owner')
+    factory.user_has_role(v_invite.organization_id, array['owner']::public.membership_role[])
+    or (factory.user_has_role(v_invite.organization_id, array['admin']::public.membership_role[]) and v_invite.role <> 'owner')
   ) then
     raise exception 'sem permissão para revogar este convite';
   end if;
@@ -327,7 +327,7 @@ begin
     raise exception 'update_organization_general requer um usuário autenticado';
   end if;
 
-  if not factory.user_has_role(p_organization_id, array['owner','admin']::membership_role[]) then
+  if not factory.user_has_role(p_organization_id, array['owner','admin']::public.membership_role[]) then
     raise exception 'apenas owner ou admin podem alterar a organização';
   end if;
 
