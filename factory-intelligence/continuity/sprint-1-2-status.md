@@ -40,7 +40,7 @@ Isto não é uma decisão que me cabe inventar (é schema — `supabase/migratio
 
 **Resposta do fiscal** (`request_id: fiscal_57bb712e9b422021c1fb2616`, `base_sha: bed8a9c`): direção técnica **(a)** — tabela `factory.invites` separada, não relaxar `memberships.user_id`. Requisitos mínimos: e-mail normalizado, papel limitado aos válidos, hash/digest do token (nunca em claro), `expires_at`, `invited_by`, `accepted_at` + quem aceitou, `revoked_at`, índice único no hash, FKs com comportamento de exclusão explícito. Convite **nunca** aparece em `factory.user_organizations()`/`factory.user_has_role()`. Aceitação como operação transacional (lock do convite, validação de organização/expiração/revogação/e-mail, sem elevação de papel pelo cliente, idempotente, sem corrida entre aceitações simultâneas). Testes de RLS obrigatórios: isolamento entre tenants, usuário comum não pode convidar com papel privilegiado, token expirado/revogado/reutilizado rejeitado, e-mail divergente rejeitado, sem duplicar membership em concorrência, convite pendente não concede acesso.
 
-**Bloqueador explícito do fiscal, ainda aberto:** "não iniciar a migration como decisão unilateral antes do congelamento documental humano" — a decisão arquitetural (mesmo já validada tecnicamente) precisa ser registrada por um responsável humano e refletida em `docs/02-ARQUITETURA/04-MODELO-DE-DADOS.md` + documentação do fluxo, antes da migration ser escrita. **Não escrevi a migration.** Levado ao usuário para decisão/congelamento — ver comentário da PR #5 e a conversa.
+**Bloqueador do fiscal — RESOLVIDO.** Decisão humana registrada na PR #5 (`[RNS-HUMAN-DECISION]`, comment_id `5767444865`, subject=invite-schema, scope=sprint-1.2): direção (a) confirmada — `factory.invites` separado, `memberships.user_id` continua `not null`. Documentado em `docs/02-ARQUITETURA/04-MODELO-DE-DADOS.md` §"invites" antes da migration, como a decisão exigia. Migration escrita: `supabase/migrations/0016_invites.sql` — ver seção "Invite-schema implementado" no fim deste documento.
 
 ## Nota — segundo gap de RLS/multi-tenant: bootstrap de organização (resolvido)
 
@@ -56,7 +56,7 @@ Limite de escopo não resolvido nesta função (documentado, não meu para decid
 
 Achados ao implementar Configurações; diferente dos dois acima, nenhum abre brecha entre organizações (não são escalação de privilégio nem vazamento cross-tenant) — por isso não voltei ao fiscal para mais uma rodada de decisão arquitetural antes de prosseguir, mas também não fingi que funcionam:
 
-1. **`governance.audit_events` não tem policy de INSERT** (só `"org members read audit"`, SELECT). `09-CONFIGURACOES.md` §12 exige "toda alteração de configuração gera audit_event" — as server actions de Configurações (`updateOrganizationGeneral`, `updateMemberRole`, `removeMember`) **não geram audit_event nenhum agora** porque a chamada falharia (RLS bloqueia). Precisa de uma função `SECURITY DEFINER` equivalente à de bootstrap de organização — não escrita ainda.
+1. ~~`governance.audit_events` não tem policy de INSERT~~ — **RESOLVIDO em `0016_invites.sql`**: `governance.log_audit_event()` (SECURITY DEFINER, sem grant a `authenticated` — só chamável por outra função do mesmo dono) usado dentro de `factory.update_organization_general`/`update_member_role`/`remove_member` (que substituíram os `update`/`delete` diretos de `settings.ts`) e das 3 novas funções de convite. Mutação + auditoria na mesma transação.
 2. **Nenhuma constraint/trigger impede uma organização ficar sem owner.** "Não remove/rebaixa o último owner" (09-CONFIGURACOES.md) está implementado só na camada de aplicação (`isLastOwner()` em `server/actions/settings.ts`), checado antes de cada `UPDATE`/`DELETE` — funciona, mas não é a defesa de banco que os outros invariantes do sistema têm (`approvals_must_be_human` etc. são `CHECK CONSTRAINT`). Uma migration com trigger seria mais robusta; não implementada agora.
 
 ## Feito, com evidência verificável
@@ -67,12 +67,12 @@ Achados ao implementar Configurações; diferente dos dois acima, nenhum abre br
 | Supabase Auth: OAuth GitHub | `signInWithGitHub` + botão real em `/login` — depende do provedor estar habilitado no Supabase Auth (infraestrutura, fora do meu mandato); código não presume que está |
 | Criação de organização no primeiro acesso | `supabase/migrations/0014_organization_bootstrap.sql`, `/organizacao/nova`, `server/actions/organizations.ts` |
 | `/login`, `/registrar`, `/recuperar-senha` | implementadas, com estados de erro/loading/acessibilidade (mostrar senha com `aria-pressed`, erro em `aria-live`) |
-| `/aceitar-convite` | **não implementada** — bloqueada pela decisão de schema de convites (ver nota acima), aguardando o usuário |
+| `/aceitar-convite` | `app/(auth)/aceitar-convite/[token]/page.tsx` — preview público via `factory.get_invite_preview`, exige login/cadastro preservando `next`, aceite via `factory.accept_invite` |
 | `/auth/callback` | `app/auth/callback/route.ts`, troca de código OAuth/e-mail por sessão |
 | Shell: AppSidebar, GlobalSearch, NotificationBell, UserMenu | `components/shell/*` — os 9 itens fixos, busca com atalho ⌘K (Base UI Dialog, sem índice de dados ainda — vazio real, não fabricado), sino (Base UI Popover, 0 notificações reais), menu do usuário (Base UI Menu, tema + sair funcionais) |
 | Design system mínimo | `packages/design-system`: tokens resolvidos (`design-system/tokens.json` + gerador `scripts/design-system/build-tokens-css.ts`), Icon, Button, Input, Card, StatusPill, AsyncBoundary, EmptyState, ErrorState |
 | Configurações: Geral | `/configuracoes/geral` — nome/descrição/fuso, RBAC (só owner/admin editam) |
-| Configurações: Equipe | `/configuracoes/equipe` — lista real, alterar papel, remover membro, proteção de último owner; convidar desabilitado (bloqueado, ver acima) |
+| Configurações: Equipe | `/configuracoes/equipe` — lista real, alterar papel, remover membro, proteção de último owner, convidar membro por e-mail (link com token, ver `invite-panel.tsx`), listar/revogar convites pendentes |
 | Configurações: Segurança | `/configuracoes/seguranca` — status real de 2FA via `supabase.auth.mfa`; sessões/chaves/log de auditoria claramente marcados como não implementados, não fabricados |
 | RBAC aplicado nas rotas | `src/proxy.ts` (sessão), `(app)/layout.tsx` (organização), `server/queries/rbac.ts` + checks por página (owner/admin para editar) |
 
@@ -92,8 +92,8 @@ Achado adicional, corrigido: `removeMember` (`server/actions/settings.ts`) não 
 
 | Item | Por que não está nesta PR | O que resolve |
 |---|---|---|
-| `/aceitar-convite/:token` + migration `factory.invites` | Aguardando decisão/congelamento humano (ver nota acima) | Usuário decide; fiscal já validou a abordagem técnica |
-| `governance.audit_events` sem função de escrita seguro | Achado durante Configurações, não é brecha de segurança entre tenants | Função SECURITY DEFINER equivalente à de bootstrap de organização |
+| ~~`/aceitar-convite/:token` + migration `factory.invites`~~ | Resolvido — ver seção "Invite-schema implementado" abaixo | — |
+| ~~`governance.audit_events` sem função de escrita seguro~~ | Resolvido em `0016_invites.sql` (`governance.log_audit_event`) | — |
 | ~~Proteção de último owner só em nível de aplicação~~ | Resolvido em `0015_memberships_owner_hardening.sql` (trigger `protect_last_owner`, com lock `FOR UPDATE` contra corrida — ver seção "Fiscal R1" abaixo) | — |
 | `supabase test db` não executado localmente | Docker sem daemon neste sandbox (mesmo limite do Sprint 1.1) | Database CI real confirma `0014_organization_bootstrap.sql` + `organization_bootstrap.sql` |
 | Testes de componente (interaction tests), E2E Playwright | Fora do que deu para cobrir neste round | Próximo round + Sprint 1.13 (aceitação da Fase 1) |
@@ -167,6 +167,19 @@ Revisão do fiscal OpenAI sem acesso live (só diff inline), 7 pontos. Validados
 6. **[MÉDIO, já rastreado] Organização ativa escolhida implicitamente pela membership mais antiga.** Limitação conhecida do MVP (`getCurrentMembership()`, "org switching é trabalho futuro" — ver achado do fiscal em `0014_organization_bootstrap.sql` acima). Decisão humana pendente, fora do meu mandato corrigir unilateralmente.
 7. **[Lacuna de evidência, não é código] Pedido de mais contexto.** Mesmo padrão do achado 6 do Fiscal R1 — pedido de evidência para revisão sem acesso live.
 
+## Invite-schema implementado (decisão humana `[RNS-HUMAN-DECISION]`, comment_id `5767444865`)
+
+Execução da tarefa aprovada (`_RNS-CONSTRUTOR/tasks/TASK-invite-schema-5767444865.md`), na ordem pedida:
+
+1. **Documentação antes da migration**: `docs/02-ARQUITETURA/04-MODELO-DE-DADOS.md` §"invites" (tabela + `invite_status`), consistente com o que `docs/03-PAGINAS/10-TELAS-TRANSVERSAIS.md`/`09-CONFIGURACOES.md` já descreviam.
+2. **Migration `supabase/migrations/0016_invites.sql`**: tabela `factory.invites` (token só como hash sha256, nunca em claro; `expires_at`; `revoked_*`/`accepted_*`); `memberships.user_id` **não** foi relaxado.
+3. **RLS**: só policy de SELECT ("admins read invites", owner/admin da própria organização) — toda escrita por função SECURITY DEFINER. ★ Achado ao escrever a migration: `grant ... on all tables in schema factory to authenticated` (0009) só alcança tabelas que já existiam quando aquele GRANT rodou — sem `ALTER DEFAULT PRIVILEGES` neste projeto, uma tabela nova nasce sem nenhum privilégio de tabela para `authenticated`. Sem `grant select on factory.invites to authenticated` explícito, a policy de SELECT nunca seria alcançada (42501 antes de qualquer RLS). Corrigido antes de virar achado de fiscal.
+4. **Funções**: `factory.create_invite`/`revoke_invite`/`accept_invite` (token/estado/expiração/identidade validados antes de criar a membership, mesma transação) + `factory.get_invite_preview` (única leitura liberada a `anon`, só por token exato, nunca lista).
+5. **Auditoria atômica**: `governance.log_audit_event()` (não exposta a `authenticated`, só chamável por outra função do mesmo dono) usada nas 3 funções de convite **e** nas 3 ações administrativas existentes, convertidas de `update`/`delete` direto para `factory.update_organization_general`/`update_member_role`/`remove_member` (SECURITY DEFINER). ★ Achado ao converter: SECURITY DEFINER ignora RLS nas próprias tabelas (privilégio do dono) — cada função reimplementa a mesma regra de autorização de `0015` (owner mexe em qualquer membership; admin nunca escala nem mexe em owner) em vez de confiar no RLS, que continua ativo só como defesa em profundidade para quem ainda acessa a Data API direto. Os triggers de último owner (`0015`) continuam valendo dentro dessas funções, porque triggers não são ignorados por SECURITY DEFINER.
+6. **Fluxo `/aceitar-convite/[token]`**: preview público (sem enumerar convites), exige login/cadastro preservando o destino (`next` agora atravessa `registrar` → `login` → callback, usando sempre `sanitizeRedirectPath`), aceite via RPC.
+7. **Equipe**: `invite-panel.tsx` (convidar com papel restrito por `canInviteRole` — mesma regra de `canModifyMembership` — mostra o link do convite uma única vez; sem provedor de e-mail configurado no repositório, então não presumi envio automático) + lista de convites pendentes com revogar.
+8. **Testes**: `supabase/tests/invites.sql` (`plan(44)`) cobrindo RLS/isolamento, as 3 funções de convite (autorização, e-mail duplicado/já-membro/inválido, expiração, uso único, identidade), e as 3 funções administrativas convertidas (incluindo último owner protegido através da RPC). `tests/unit/control-plane/rbac.test.ts` ganhou os casos de `canInviteRole`. **Não executado localmente** (mesmo limite de Docker dos rounds anteriores) — roda de verdade no Database CI.
+
 ## Estado final do sprint
 
-Todos os itens do checklist original estão entregues, exceto `/aceitar-convite` (bloqueado por decisão humana pendente, não por trabalho faltando) — ver nota acima. A "SAÍDA" pedida (entrar, criar organização, convidar membro, alterar papel) está coberta parcialmente: entrar/criar organização/alterar papel funcionam ponta a ponta; "convidar membro" só cobre convidar alguém que já tem conta (o botão de convite por e-mail fica desabilitado, propositalmente, até a decisão de schema).
+Todos os itens do checklist original estão entregues, incluindo `/aceitar-convite` (implementado nesta rodada, após a decisão humana de schema). A "SAÍDA" pedida (entrar, criar organização, convidar membro, alterar papel) está coberta ponta a ponta, incluindo convidar alguém que ainda não tem conta na Fábrica.
