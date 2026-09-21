@@ -78,6 +78,8 @@ unique (organization_id, lower(email)) where status = 'pending'
 ```
 Sem policy de INSERT/UPDATE/DELETE direta — toda escrita passa por funções `SECURITY DEFINER` (`factory.create_invite`, `factory.revoke_invite`, `factory.accept_invite`), mesmo padrão de `factory.create_organization` (0014). `factory.get_invite_preview(token)` é a única leitura liberada a `anon` (só pelas colunas necessárias para a tela `/aceitar-convite`, nunca lista/enumera convites).
 
+**Semântica de estado/expiração dos convites** (esclarece o enum `pending|accepted|revoked|expired`, que antes só listava os valores): `expires_at` é a fonte de verdade. `pending` com `expires_at` no passado é tratado como **expirado** por todos os consumidores — `accept_invite` rejeita ("convite expirado") e `get_invite_preview` expõe o status efetivo `expired`. O valor `expired` é **materializado sob demanda** por `factory.create_invite`, que marca como `expired` os convites vencidos do mesmo e-mail/organização *antes* de checar duplicidade; assim um convite vencido nunca bloqueia um novo convite (o índice único parcial só enxerga `status = 'pending'`). `accept_invite` não grava `expired`: um `UPDATE` seguido de `RAISE EXCEPTION` seria desfeito pelo rollback da própria chamada.
+
 ### `apps`  *(na UI: "Projetos")*
 ```
 id uuid pk

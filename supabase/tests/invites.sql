@@ -7,7 +7,7 @@
 -- para RPC (update_organization_general, update_member_role, remove_member).
 -- ============================================================
 begin;
-select plan(44);
+select plan(49);
 
 -- ---------- Fixtures (como superusuário) ----------
 insert into auth.users (id) values
@@ -291,6 +291,50 @@ select is(
   (select status from factory.invites where id = 'e1000000-0000-0000-0000-000000000001'),
   'pending'::invite_status,
   '32. convite expirado permanece "pending" no banco (expires_at é a fonte de verdade, não a coluna status)'
+);
+
+-- ---------- convite vencido NÃO bloqueia novo convite para o mesmo e-mail ----------
+-- (e-mail próprio: invitee@rns.test já virou membro no bloco D)
+insert into factory.invites (id, organization_id, email, role, token_hash, status, invited_by, expires_at) values
+  ('e1000000-0000-0000-0000-000000000003', 'aa000000-0000-0000-0000-000000000001', 'stale@rns.test', 'viewer',
+   encode(digest('token-stale-vencido', 'sha256'), 'hex'), 'pending', 'a1000000-0000-0000-0000-000000000001', now() - interval '2 days');
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"c1000000-0000-0000-0000-000000000001"}', true);
+
+select is(
+  (select status from factory.get_invite_preview('token-stale-vencido')),
+  'expired'::invite_status,
+  '32a. preview expõe o status EFETIVO: pending + expires_at no passado aparece como "expired"'
+);
+
+select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000001"}', true);
+
+select lives_ok(
+  $$ select factory.create_invite('aa000000-0000-0000-0000-000000000001', 'stale@rns.test', 'viewer') $$,
+  '32b. convite vencido (pending + expires_at no passado) NÃO bloqueia novo convite para o mesmo e-mail'
+);
+
+reset role;
+select is(
+  (select status from factory.invites where id = 'e1000000-0000-0000-0000-000000000003'),
+  'expired'::invite_status,
+  '32c. o convite vencido foi materializado como "expired" (UPDATE persiste: nenhum RAISE depois dele)'
+);
+select is(
+  (select count(*)::int from factory.invites
+    where organization_id = 'aa000000-0000-0000-0000-000000000001' and lower(email) = 'stale@rns.test' and status = 'pending'),
+  1,
+  '32d. só o novo convite fica pendente (índice único parcial preservado)'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"c1000000-0000-0000-0000-000000000001"}', true);
+
+select throws_ok(
+  $$ select factory.accept_invite('token-stale-vencido') $$,
+  null, 'convite expirado',
+  '32e. o token do convite vencido (já "expired") continua rejeitado com "convite expirado"'
 );
 
 -- ---------- já é membro (edge case: virou membro depois do convite ser criado) ----------

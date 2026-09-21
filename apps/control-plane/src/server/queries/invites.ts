@@ -21,6 +21,7 @@ export async function listPendingInvites(organizationId: string): Promise<Pendin
     .select('id, email, role, status, expires_at, created_at')
     .eq('organization_id', organizationId)
     .eq('status', 'pending')
+    .gt('expires_at', new Date().toISOString()) // pending + vencido é "expirado": não entra na lista de pendentes
     .order('created_at', { ascending: true });
 
   if (error || !data) return [];

@@ -140,6 +140,21 @@ begin
     raise exception 'este e-mail já é membro da organização';
   end if;
 
+  -- Semântica de expiração: expires_at é a fonte de verdade e `expired` é
+  -- materializado sob demanda. Um convite `pending` com expires_at no passado
+  -- não pode bloquear um novo convite (o índice único parcial
+  -- invites_org_email_pending_uq só enxerga status = 'pending'), então os
+  -- vencidos deste e-mail passam a `expired` ANTES da checagem de duplicidade.
+  -- Este UPDATE persiste: nenhum RAISE ocorre depois dele no caminho normal
+  -- (se um erro posterior abortar a chamada, o UPDATE some junto — e o estado
+  -- volta a ser o "pending vencido", que continua tratado como expirado).
+  update factory.invites inv
+     set status = 'expired', updated_at = now()
+   where inv.organization_id = p_organization_id
+     and lower(inv.email) = v_email
+     and inv.status = 'pending'
+     and inv.expires_at < now();
+
   if exists (
     select 1 from factory.invites inv
     where inv.organization_id = p_organization_id
@@ -224,7 +239,11 @@ stable
 security definer
 set search_path = ''
 as $$
-  select o.name, i.email, i.role, i.status, i.expires_at
+  -- Status efetivo: pending + expires_at no passado é exposto como `expired`.
+  select o.name, i.email, i.role,
+         case when i.status = 'pending' and i.expires_at < now()
+              then 'expired'::public.invite_status else i.status end,
+         i.expires_at
   from factory.invites i
   join factory.organizations o on o.id = i.organization_id
   where i.token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
@@ -267,10 +286,12 @@ begin
   -- Não persiste status = 'expired' aqui: o UPDATE seria desfeito junto
   -- com a própria transação ao dar raise logo em seguida (Postgres não
   -- distingue "commita isto, depois aborta"; sem autonomous transaction,
-  -- todo efeito da chamada é revertido quando a exceção sobe). expires_at
-  -- já é a fonte de verdade — quem lista convites deve tratar pending +
-  -- expires_at no passado como expirado, em vez de confiar só na coluna status.
-  if v_invite.status = 'pending' and v_invite.expires_at < now() then
+  -- todo efeito da chamada é revertido quando a exceção sobe). A
+  -- materialização de `expired` acontece em factory.create_invite (caminho
+  -- que segue adiante e commita). Aqui, tanto `expired` já materializado
+  -- quanto `pending` com expires_at no passado são "convite expirado".
+  if v_invite.status = 'expired'
+     or (v_invite.status = 'pending' and v_invite.expires_at < now()) then
     raise exception 'convite expirado';
   end if;
 
