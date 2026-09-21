@@ -181,13 +181,17 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @stale.json
 
+          {
+            echo "### Fiscal OpenAI — resposta invalidada"
+            echo
+            echo "request_id: \`${{ steps.bridge.outputs.request_id }}\`"
+            echo
+            echo "O SHA mudou antes da publicação. Execute novamente \`/fiscal <pedido>\` sobre o estado atual."
+          } > stale-comment.md
+
           gh api --method POST \
             "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
-            --raw-field body="### Fiscal OpenAI — resposta invalidada
-
-request_id: \`${{ steps.bridge.outputs.request_id }}\`
-
-O SHA mudou antes da publicação. Execute novamente \`/fiscal <pedido>\` sobre o estado atual."
+            --raw-field body="$(cat stale-comment.md)"
 
       - name: Publicar e confirmar read-after-write
         if: "!startsWith(github.event.comment.body, '/fiscal ack ') && steps.freshness.outputs.fresh == 'true'"
