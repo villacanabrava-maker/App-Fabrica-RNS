@@ -8,7 +8,17 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "1.47.0",
+    "tailwind-merge": "3.7.0"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
   "devDependencies": {
+    "@types/react": "19.3.0",
     "typescript": "7.0.2"
   }
 }
