@@ -12,6 +12,18 @@ select plan(22);
 -- transação de teste (revertida no rollback) para exercitar a policy de DELETE e o trigger de último owner.
 grant delete on factory.memberships to authenticated;
 
+-- Conta linhas afetadas por um DML (CTE de escrita não pode ficar dentro de subselect).
+-- Função temporária: some com o rollback; roda como o papel ativo (RLS aplicado).
+create function pg_temp.affected_rows(p_sql text) returns integer
+language plpgsql as $$
+declare n integer;
+begin
+  execute p_sql;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+
 -- ---------- Fixtures (como superusuário) ----------
 insert into auth.users (id) values
   ('a0000000-0000-0000-0000-00000000000a'),  -- ownerA
@@ -116,12 +128,9 @@ select is(
 );
 
 select is(
-  (with u as (
-     update factory.memberships set role = 'viewer'
+  pg_temp.affected_rows($$ update factory.memberships set role = 'viewer'
       where organization_id = 'aaaaaaaa-0000-0000-0000-000000000001'
-        and user_id = 'a0000000-0000-0000-0000-00000000000a'
-      returning 1)
-   select count(*)::int from u),
+        and user_id = 'a0000000-0000-0000-0000-00000000000a' $$),
   0,
   '5. admin NÃO rebaixa owner (linha invisível: 0 linhas afetadas)'
 );
@@ -133,12 +142,9 @@ select is(
 );
 
 select is(
-  (with d as (
-     delete from factory.memberships
+  pg_temp.affected_rows($$ delete from factory.memberships
       where organization_id = 'aaaaaaaa-0000-0000-0000-000000000001'
-        and user_id = 'a0000000-0000-0000-0000-00000000000a'
-      returning 1)
-   select count(*)::int from d),
+        and user_id = 'a0000000-0000-0000-0000-00000000000a' $$),
   0,
   '6. admin NÃO remove owner'
 );
@@ -210,12 +216,9 @@ select is(
   '14. owner de outra organização NÃO enxerga memberships da Org A'
 );
 select is(
-  (with u as (
-     update factory.memberships set role = 'owner'
+  pg_temp.affected_rows($$ update factory.memberships set role = 'owner'
       where organization_id = 'aaaaaaaa-0000-0000-0000-000000000001'
-        and user_id = 'a0000000-0000-0000-0000-00000000000e'
-      returning 1)
-   select count(*)::int from u),
+        and user_id = 'a0000000-0000-0000-0000-00000000000e' $$),
   0,
   '15. owner de outra organização NÃO altera memberships da Org A'
 );
