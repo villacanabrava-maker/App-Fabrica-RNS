@@ -70,8 +70,31 @@ describe('canTransition — task state machine', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('cancelamento por humano é sempre permitido, mesmo fora do grafo explícito', () => {
+  it('cancelamento por humano é sempre permitido, mesmo fora do grafo explícito, PARA ESTADO NÃO TERMINAL', () => {
     const result = canTransition('running', 'cancelled', 'cancel', 'human', baseCtx);
+    expect(result).toEqual({ ok: true });
+  });
+
+  // ★ Regressão: achado do fiscal — o atalho universal de cancelamento
+  // rodava antes da checagem de terminalidade e permitia reabrir um
+  // estado terminal via 'cancelled'.
+  it('um estado terminal (completed) NÃO aceita cancelamento — só superseded', () => {
+    const result = canTransition('completed', 'cancelled', 'cancel', 'human', baseCtx);
+    expect(result.ok).toBe(false);
+  });
+
+  it('um estado terminal (failed_terminal) NÃO aceita cancelamento — só superseded', () => {
+    const result = canTransition('failed_terminal', 'cancelled', 'cancel', 'human', baseCtx);
+    expect(result.ok).toBe(false);
+  });
+
+  it('um estado terminal (cancelled) NÃO aceita cancelar de novo — só superseded', () => {
+    const result = canTransition('cancelled', 'cancelled', 'cancel', 'human', baseCtx);
+    expect(result.ok).toBe(false);
+  });
+
+  it('superseded continua alcançável a partir de um estado terminal, pelo sistema', () => {
+    const result = canTransition('completed', 'superseded', 'auto', 'system', baseCtx);
     expect(result).toEqual({ ok: true });
   });
 

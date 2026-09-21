@@ -95,7 +95,18 @@ export function evaluatePolicy(
 
   // 4. produção — ver PolicyContext.environment em types.ts para a extensão
   // que torna esta regra verificável.
-  if (profile.production === 'deny' && context.environment === 'production' && !registry.askActions.includes(action)) {
+  //
+  // ★ Achado do fiscal: a primeira regra que casa VENCE. Uma exceção
+  // aqui para ask_actions violava a ordem documentada, avaliando o
+  // passo 5 antes do passo 4 terminar. Corrigido para DENY
+  // incondicional: nenhuma ação com alvo em produção passa por este
+  // profile, mesmo que o nome da ação também apareça em ask_actions.
+  // Uma entrada de ask_actions só é alcançável quando o chamador NÃO
+  // marcou context.environment = 'production' — a escalada humana para
+  // uma ação de produção de verdade acontece por um caminho de
+  // governança separado (Release Service, actor_type != 'agent'), não
+  // por um agente tentando e sendo perguntado.
+  if (profile.production === 'deny' && context.environment === 'production') {
     return {
       decision: 'deny',
       reason: `Ação "${action}" tem alvo em produção e o profile "${context.profile}" nunca permite produção.`,

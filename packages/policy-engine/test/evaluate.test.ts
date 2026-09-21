@@ -110,19 +110,31 @@ describe('evaluatePolicy — passo 4: produção', () => {
     expect(result).toMatchObject({ decision: 'deny', policyRef: 'production_deny' });
   });
 
-  it('uma ação de produção que está em ask_actions vira ASK, não DENY direto', () => {
+  // ★ Regressão: achado do fiscal. "Primeira regra que casa vence"
+  // significa que o passo 4 não deve olhar à frente para o passo 5.
+  // Mesmo uma ação que também está em ask_actions é DENY incondicional
+  // quando o contexto marca produção — não há atalho de ASK aqui.
+  it('uma ação de produção que TAMBÉM está em ask_actions ainda é DENY — passo 4 não olha à frente para o passo 5', () => {
     const result = evaluatePolicy(
       req({ action: 'vercel.deployment.promote', context: { ...req().context, environment: 'production' } }),
       registry,
     );
-    expect(result.decision).toBe('ask');
+    expect(result).toMatchObject({ decision: 'deny', policyRef: 'production_deny' });
   });
 });
 
 describe('evaluatePolicy — passo 5: ask_actions', () => {
-  it('escalona para humano sem negar nem permitir', () => {
+  it('escalona para humano sem negar nem permitir, quando o contexto NÃO marca produção', () => {
     const result = evaluatePolicy(req({ action: 'supabase.migration.apply_production' }), registry);
     expect(result).toMatchObject({ decision: 'ask' });
+  });
+
+  it('a mesma ação de ask_actions, com o contexto marcando produção, vira DENY — não ASK', () => {
+    const result = evaluatePolicy(
+      req({ action: 'supabase.migration.apply_production', context: { ...req().context, environment: 'production' } }),
+      registry,
+    );
+    expect(result).toMatchObject({ decision: 'deny', policyRef: 'production_deny' });
   });
 });
 
