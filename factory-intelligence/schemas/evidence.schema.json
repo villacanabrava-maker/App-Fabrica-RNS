@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/evidence.schema.json",
+  "title": "RNS Evidence",
+  "description": "Prova verificável. Afirmar concluído, testado ou seguro exige ao menos uma evidência verified.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidence_id","type","source","observed_at","collector","integrity"],
+  "properties": {
+    "evidence_id": { "type": "string" },
+    "type": {
+      "enum": ["code","test","ci","runtime","browser","database","external_source","human"]
+    },
+    "source":      { "type": "string", "minLength": 1 },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "collector":   { "type": "string", "minLength": 1 },
+
+    "commit_sha":      { "type": ["string","null"], "pattern": "^[0-9a-f]{40}$" },
+    "artifact_sha256": { "type": ["string","null"], "pattern": "^[0-9a-f]{64}$" },
+
+    "claim_ids": { "type": "array", "items": { "type": "string" } },
+
+    "integrity": {
+      "enum": ["verified","reported","inferred","pending"],
+      "description": "verified = observado diretamente e reproduzível."
+    },
+
+    "summary": { "type": ["string","null"], "maxLength": 2000 }
+  }
+}

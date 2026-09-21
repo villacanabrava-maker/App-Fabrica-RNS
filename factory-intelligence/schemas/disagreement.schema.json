@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/disagreement.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["disagreement_id", "subject_id", "review_ids", "claim", "status", "created_at"],
+  "properties": {
+    "disagreement_id": {"type": "string"},
+    "subject_id": {"type": "string"},
+    "review_ids": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    "claim": {"type": "string"},
+    "options": {"type": "array", "items": {"type": "string"}},
+    "status": {"enum": ["open", "resolved_by_evidence", "resolved_by_human", "accepted_risk"]},
+    "resolution": {"type": ["string", "null"]},
+    "resolved_by": {"type": ["string", "null"]},
+    "evidence_ids": {"type": "array", "items": {"type": "string"}},
+    "created_at": {"type": "string", "format": "date-time"},
+    "resolved_at": {"type": ["string", "null"], "format": "date-time"}
+  }
+}
+

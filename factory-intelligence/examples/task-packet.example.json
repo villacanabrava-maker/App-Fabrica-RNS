@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "mission_id": "mis_demo_001",
+  "task_id": "tsk_demo_001",
+  "run_id": "run_demo_001",
+  "role": "R4",
+  "runtime": "synthetic",
+  "model": null,
+  "repository": "rns/demo-app",
+  "base_sha": "0000000000000000000000000000000000000000",
+  "branch": "agent/tsk_demo_001",
+  "objective": "Adicionar endpoint de health sem acessar dados sensíveis.",
+  "acceptance_criteria": [
+    "GET /api/health retorna 200 e schema versionado",
+    "Teste automatizado cobre sucesso"
+  ],
+  "allowed_paths": ["apps/web/app/api/health/**", "tests/**"],
+  "forbidden_paths": [".env*", ".github/workflows/**", "supabase/migrations/**"],
+  "required_skills": ["typescript-web-v1", "testing-v1"],
+  "permissions": {
+    "filesystem": "workspace",
+    "network": "deny",
+    "git_push": "branch_only",
+    "production": "deny"
+  },
+  "budget": {
+    "max_cost_usd": 1,
+    "max_wall_seconds": 900,
+    "max_review_hops": 4
+  },
+  "expected_artifacts": ["patch", "test-result", "commit"]
+}
+

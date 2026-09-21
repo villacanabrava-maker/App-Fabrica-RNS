@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/policy-decision.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision_id", "policy_id", "policy_version", "actor", "action", "resource", "environment", "effect", "evaluated_at"],
+  "properties": {
+    "decision_id": {"type": "string"},
+    "policy_id": {"type": "string"},
+    "policy_version": {"type": "string"},
+    "actor": {"type": "object"},
+    "action": {"type": "string"},
+    "resource": {"type": "object"},
+    "environment": {"enum": ["local", "preview", "staging", "production"]},
+    "risk_level": {"enum": ["low", "medium", "high", "critical"]},
+    "effect": {"enum": ["ALLOW", "ASK", "DENY"]},
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "approval_id": {"type": ["string", "null"]},
+    "evaluated_at": {"type": "string", "format": "date-time"}
+  }
+}
+

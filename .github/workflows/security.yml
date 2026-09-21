@@ -1,0 +1,41 @@
+name: Security
+
+on:
+  pull_request:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Analisar com CodeQL
+        uses: github/codeql-action/analyze@v3
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+
+      - name: Varredura de segredos no histórico
+        run: pnpm tsx scripts/security/scan-secrets.ts
+
+      - name: Auditoria de dependências
+        run: pnpm audit --audit-level=high
+
+      - name: Verificar integridade do lockfile
+        run: pnpm install --frozen-lockfile --lockfile-only

@@ -1,0 +1,51 @@
+name: Intelligence CI
+
+on:
+  pull_request:
+    paths:
+      - 'factory-intelligence/**'
+      - '.agents/**'
+      - '.claude/**'
+      - '.codex/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'scripts/intelligence/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validar JSON Schemas
+        run: pnpm tsx scripts/intelligence/validate-schemas.ts
+
+      - name: Validar registries YAML
+        run: pnpm tsx scripts/intelligence/validate-registry.ts
+
+      - name: Reconstruir projeções
+        run: pnpm tsx scripts/intelligence/build-projections.ts
+
+      # ★ O coração deste workflow.
+      # Falha se alguém editou .agents/skills ou .claude/skills à mão,
+      # ou se a projeção divergiu da fonte canônica.
+      - name: Detectar drift das projeções
+        run: pnpm tsx scripts/intelligence/check-drift.ts
+
+      - name: Validar fixtures contra os schemas
+        run: pnpm tsx scripts/intelligence/validate-fixtures.ts
+
+      - name: Evals de fumaça das skills alteradas
+        run: pnpm tsx scripts/intelligence/run-evals.ts --changed-only

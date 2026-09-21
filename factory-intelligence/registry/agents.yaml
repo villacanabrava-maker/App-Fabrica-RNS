@@ -1,0 +1,118 @@
+# ============================================================
+# RNS Agent Registry — fonte canônica dos papéis R1–R9
+#
+# Princípio: Role ≠ Runtime ≠ Model ≠ Skill
+# Nenhum papel tem fornecedor fixo. Nenhum modelo aparece aqui.
+#
+# Protegido por CODEOWNERS. Alterar write_policy exige
+# revisão de segurança.
+# ============================================================
+version: 1
+registry: rns-agent-registry
+updated_at: '2026-09-20'
+
+roles:
+  R1:
+    name: orchestration-intelligence
+    title: Orchestration Intelligence
+    description: >-
+      Interpreta a missão, decompõe o trabalho, propõe DAG, owners e sequência.
+      NÃO é o Orchestrator: sugere, não efetiva transições.
+    write_policy: read_only
+    can_schedule_runs: false
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [plan-decomposition, dependency-analysis]
+    minimum_output: agent-output.schema.json
+
+  R2:
+    name: architecture
+    title: Architecture
+    description: Arquitetura, interfaces, ADRs, dependências e trade-offs.
+    write_policy: read_only
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [architecture-review, adr-authoring]
+    minimum_output: review.schema.json
+
+  R3:
+    name: research
+    title: Research
+    description: >-
+      Pesquisa técnica externa, versões, documentação oficial e validação
+      de fontes. Único papel com egress de rede ampliado.
+    write_policy: read_only
+    network: broad
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [deep-research, source-validation]
+    minimum_output: evidence.schema.json
+    requires_external_sources: true
+
+  R4:
+    name: builder
+    title: Builder
+    description: Implementação de front-end, back-end e infraestrutura como código.
+    write_policy: workspace_write
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [implementation, ci-repair]
+    minimum_output: agent-output.schema.json
+    requires_independent_review: true
+
+  R5:
+    name: reviewer
+    title: Reviewer
+    description: Revisão adversarial e cross-model de plano e de código.
+    write_policy: read_only
+    independent_review: true
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [plan-review, code-review]
+    minimum_output: review.schema.json
+
+  R6:
+    name: qa-testing
+    title: QA & Testing
+    description: Testes, regressões, integração, CI e evals.
+    write_policy: test_workspace
+    independent_review: true
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [test-design, regression-analysis]
+    minimum_output: evidence.schema.json
+
+  R7:
+    name: security-data
+    title: Security & Data
+    description: AppSec, Supabase, migrations, RLS e secrets.
+    write_policy: read_only
+    independent_review: true
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [security-audit, rls-audit, migration-review]
+    minimum_output: review.schema.json
+    blocking_severity: critical
+
+  R8:
+    name: ux-browser-verification
+    title: UX & Browser Verification
+    description: Verificação no navegador, E2E, UX e acessibilidade.
+    write_policy: preview_only
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [browser-validation, accessibility-review]
+    minimum_output: evidence.schema.json
+    requires_preview_pair: true
+
+  R9:
+    name: release-evidence
+    title: Release & Evidence
+    description: Reconcilia evidências, avalia prontidão de release e encerra.
+    write_policy: governance_only
+    can_merge: false
+    can_deploy_production: false
+    can_approve_human_gate: false
+    allowed_runtimes: [openai, anthropic, mock]
+    default_skills: [evidence-synthesis, release-readiness]
+    minimum_output: evidence.schema.json

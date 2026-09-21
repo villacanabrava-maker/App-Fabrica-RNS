@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rns.local/schemas/finding.schema.json",
+  "title": "RNS Finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "finding_id","category","severity","claim",
+    "status","blocks_progress","evidence_ids"
+  ],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "category": {
+      "enum": ["architecture","correctness","security","data","testing",
+               "performance","ux","operations","research","requirement"]
+    },
+    "severity": { "enum": ["info","low","medium","high","critical"] },
+
+    "claim":          { "type": "string", "minLength": 10, "maxLength": 2000 },
+    "recommendation": { "type": ["string","null"], "maxLength": 2000 },
+    "location":       { "type": ["string","null"] },
+
+    "status": { "enum": ["open","accepted","rejected","resolved","deferred"] },
+    "blocks_progress": { "type": "boolean" },
+
+    "introduced_by":    { "type": ["string","null"] },
+    "introduced_round": { "type": ["integer","null"], "minimum": 1, "maximum": 4 },
+
+    "evidence_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Finding sem evidência é opinião. Exigido para severity high e critical."
+    },
+
+    "disposition_reason": {
+      "type": ["string","null"],
+      "description": "Obrigatório quando status é rejected ou deferred."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "severity": { "enum": ["high","critical"] } },
+              "required": ["severity"] },
+      "then": { "properties": { "evidence_ids": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["rejected","deferred"] } },
+              "required": ["status"] },
+      "then": { "properties": { "disposition_reason": { "type": "string", "minLength": 10 } },
+                "required": ["disposition_reason"] }
+    }
+  ]
+}
