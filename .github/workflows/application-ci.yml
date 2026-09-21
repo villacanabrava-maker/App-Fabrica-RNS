@@ -1,0 +1,43 @@
+name: Application CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # ★ Falha se encontrar padrão de segredo em variável pública.
+      - name: Verificar segredos em variáveis públicas
+        run: pnpm tsx scripts/check-public-env.ts
+
+      - name: Testes unitários
+        run: pnpm test:unit --coverage
+
+      - name: Testes de integração
+        run: pnpm test:integration
+
+      - name: Testes de componente e acessibilidade
+        run: pnpm test:storybook
+
+      - name: Build
+        run: pnpm build

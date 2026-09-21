@@ -1,0 +1,126 @@
+# ============================================================
+# RNS Permissions — perfis de permissão por papel
+#
+# Regra de avaliação (a primeira que casa vence):
+#   1. denied_tools_always            -> DENY
+#   2. forbidden_paths_always         -> DENY
+#   3. forbidden_paths do Task Packet -> DENY
+#   4. produção                       -> DENY
+#   5. classe ASK                     -> ASK
+#   6. permitido pelo profile         -> ALLOW
+#   7. caso contrário                 -> DENY  (padrão FECHADO)
+#
+# Protegido por CODEOWNERS + revisão de segurança.
+# ============================================================
+version: 1
+registry: rns-permissions
+
+profiles:
+  read_only:
+    filesystem: read_only
+    github: read
+    supabase: metadata_read
+    vercel: none
+    network: restricted
+    production: deny
+    shell:
+      allow: [ls, cat, head, tail, grep, find, wc, 'git status', 'git log', 'git diff', 'git show']
+      deny:  [rm, mv, cp, curl, wget, 'npm install', 'pip install', sudo, chmod, ssh]
+
+  research:
+    extends: read_only
+    network: broad
+    shell:
+      allow: [ls, cat, head, grep, find, 'git log']
+      deny:  [rm, mv, sudo, ssh]
+
+  workspace_write:
+    filesystem: workspace_write
+    github: branch_write
+    supabase: preview_only
+    vercel: preview_read
+    network: package_registries
+    production: deny
+    shell:
+      allow: [git, npm, pnpm, node, npx, tsc, vitest, playwright, ls, cat, grep, find, mkdir, touch]
+      deny:  [sudo, 'chmod 777', 'curl * | sh', 'wget * | sh', ssh, 'rm -rf /']
+
+  test_workspace:
+    extends: workspace_write
+    github: read
+    supabase: preview_read_write
+
+  preview_only:
+    filesystem: read_only
+    github: read
+    supabase: preview_read
+    vercel: preview
+    network: preview_only
+    production: deny
+    shell:
+      allow: [playwright, node, ls, cat]
+      deny:  [git, rm, sudo, ssh]
+
+  governance_only:
+    filesystem: read_only
+    github: read
+    supabase: schema_read
+    vercel: logs_read
+    network: restricted
+    production: deny
+    can_merge: false
+    can_deploy_production: false
+    shell:
+      allow: [ls, cat, grep, 'git log']
+      deny:  [rm, mv, sudo, ssh, git]
+
+roles:
+  R1: { profile: read_only }
+  R2: { profile: read_only }
+  R3: { profile: research }
+  R4: { profile: workspace_write }
+  R5: { profile: read_only }
+  R6: { profile: test_workspace }
+  R7: { profile: read_only, exceptions: [supabase_preview_write] }
+  R8: { profile: preview_only }
+  R9: { profile: governance_only }
+
+# ★ Entram em TODO Task Packet, somados aos específicos da tarefa.
+# Um Task Packet sem estes é INVÁLIDO.
+forbidden_paths_always:
+  - 'factory-intelligence/**'
+  - '.github/workflows/**'
+  - '.github/CODEOWNERS'
+  - '.agents/**'
+  - '.claude/**'
+  - '.codex/**'
+  - 'AGENTS.md'
+  - 'CLAUDE.md'
+  - 'scripts/intelligence/**'
+  - '**/.env*'
+  - '**/*secret*'
+  - '**/*credential*'
+  - '**/id_rsa*'
+
+denied_tools_always:
+  - github.merge
+  - github.force_push
+  - github.delete_branch_protection
+  - supabase.production.migrate
+  - supabase.disable_rls
+  - supabase.read_secret_key
+  - vercel.production.promote
+  - vercel.force_promote
+  - secret.read
+  - project.delete
+  - organization.delete
+  - approval.grant          # ★ agente nunca aprova
+
+# Ações que exigem decisão humana
+ask_actions:
+  - supabase.migration.apply_production
+  - vercel.deployment.promote
+  - github.pr.merge
+  - integration.connect
+  - budget.increase
+  - organization.settings.security_change

@@ -1,0 +1,53 @@
+version: 1
+registry: rns-runtimes
+
+runtimes:
+  mock:
+    enabled: true
+    surfaces: [deterministic_fixture]
+    notes: 'Fase 1. Sem rede, sem custo, determinístico.'
+
+  openai:
+    enabled: false          # habilitar na Fase 2
+    surfaces:
+      - key: codex_worker
+        description: 'Worker próprio com controle do worktree. Uso: implementação.'
+      - key: agents_api
+        description: 'Runtime gerenciado com sessão assíncrona. Uso: workload gerenciado.'
+      - key: github_action
+        description: 'Execução em CI. Uso: reviews e checks previsíveis.'
+    auth:
+      preferred: wif_oidc
+      fallback: api_key
+      notes: 'WIF/OIDC via GitHub Actions é o padrão. API key permanente é exceção documentada.'
+
+  anthropic:
+    enabled: false          # habilitar na Fase 2
+    surfaces:
+      - key: managed_agents
+        description: 'Sessão gerenciada com skills e mount de repositório. Adapter cloud principal.'
+      - key: claude_code_worker
+        description: 'Worker self-managed governado pelo nosso wrapper.'
+      - key: github_action
+        description: 'Execução em CI.'
+    auth:
+      preferred: wif_oidc
+      fallback: api_key
+    billing:
+      meters: [input_tokens, cache_hit_tokens, output_tokens, session_hours]
+      notes: '★ session_hours em estado running é medido além dos tokens.'
+    constraints:
+      skills_discovery: '.claude/skills/<nome>/SKILL.md, exatamente um nível'
+      skills_discovery_timing: 'uma vez, no início da sessão'
+      notes: 'Commits no meio da sessão NÃO recarregam skills.'
+
+  antigravity:
+    enabled: false          # habilitar na Fase 2
+    surfaces:
+      - key: local_handoff
+        description: 'Estação de comando local. NÃO é worker cloud.'
+    auth:
+      preferred: local_bridge_outbound
+    constraints:
+      merge: deny
+      production: deny

@@ -1,0 +1,42 @@
+name: Release Checks
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  production-checks:
+    name: production-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+
+      - name: Smoke tests de produção
+        run: pnpm test:smoke
+
+      - name: E2E do caminho crítico
+        run: pnpm test:e2e:critical
+
+      - name: Verificação final de segurança
+        run: pnpm test:security
+
+      - name: Verificação de migration em produção
+        run: pnpm tsx scripts/db/verify-production-migration.ts
+
+      # Estes são os Deployment Checks configurados no Vercel.
+      # Enquanto não passarem, o build de produção existe
+      # mas NÃO recebe usuários.
+      - name: Reportar status ao Vercel
+        uses: vercel/repository-dispatch/actions/status@v1
+        with:
+          name: 'Vercel - control-plane: release-checks'

@@ -1,0 +1,50 @@
+name: Preview E2E
+
+# ★ NÃO dispara em pull_request.
+# Espera o Orchestrator confirmar que o preview pair está pronto
+# (Supabase preview branch E Vercel preview deployment).
+# Rodar antes disso produz falha intermitente.
+on:
+  repository_dispatch:
+    types: [rns.preview_pair_ready]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.head_sha }}
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E contra o preview
+        env:
+          PREVIEW_URL: ${{ github.event.client_payload.preview_url }}
+          SUPABASE_BRANCH: ${{ github.event.client_payload.supabase_branch }}
+        run: pnpm test:e2e
+
+      - name: Acessibilidade no preview
+        env:
+          PREVIEW_URL: ${{ github.event.client_payload.preview_url }}
+        run: pnpm test:a11y
+
+      # ★ Nome ÚNICO do check, incluindo o ambiente.
+      # Nomes duplicados entre workflows colidem e causam
+      # promoção intermitente no Vercel.
+      - name: Reportar status ao Vercel
+        uses: vercel/repository-dispatch/actions/status@v1
+        with:
+          name: 'Vercel - control-plane: preview-e2e'
