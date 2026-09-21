@@ -23,6 +23,7 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "::notice::package.json ausente — scripts/db/{test-rollback,assert-rls-enabled,assert-invariants}.ts são Fase 1 (ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md). Este workflow passa a aplicar e testar as migrations de verdade assim que a Fase 1 adicionar o toolchain Node."
+          fi
 
   migrations:
     name: migrations

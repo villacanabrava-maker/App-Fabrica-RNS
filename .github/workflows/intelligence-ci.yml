@@ -29,6 +29,7 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "::notice::package.json ausente — a Fase 1 (app funcional) ainda não foi implementada, ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md. Este workflow passa a validar de verdade assim que a Fase 1 adicionar os scripts em scripts/intelligence/."
+          fi
 
   validate:
     name: validate
