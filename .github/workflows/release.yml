@@ -9,8 +9,26 @@ permissions:
   statuses: write
 
 jobs:
+  detect-app:
+    name: detect-app
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::package.json ausente — a Fase 1 (app funcional) ainda não foi implementada, ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md. Nada em produção ainda para verificar."
+          fi
+
   production-checks:
     name: production-checks
+    needs: detect-app
+    if: needs.detect-app.outputs.exists == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

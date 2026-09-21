@@ -13,8 +13,28 @@ permissions:
   statuses: write
 
 jobs:
+  detect-app:
+    name: detect-app
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.head_sha }}
+      - id: check
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::package.json ausente — este evento não deveria ter sido disparado antes da Fase 1 (app funcional) existir. Ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md."
+          fi
+
   e2e:
     name: e2e
+    needs: detect-app
+    if: needs.detect-app.outputs.exists == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -10,6 +10,21 @@ permissions:
   security-events: write
 
 jobs:
+  detect-app:
+    name: detect-app
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
   scan:
     name: scan
     runs-on: ubuntu-latest
@@ -24,6 +39,13 @@ jobs:
       - name: Analisar com CodeQL
         uses: github/codeql-action/analyze@v3
 
+  scan-dependencies:
+    name: scan-dependencies
+    needs: detect-app
+    if: needs.detect-app.outputs.exists == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
