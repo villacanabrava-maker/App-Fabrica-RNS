@@ -367,7 +367,7 @@ set search_path = ''
 as $$
 declare
   v_user_id     uuid := auth.uid();
-  v_actor_role  membership_role;
+  v_actor_role  public.membership_role;
   v_target      factory.memberships;
 begin
   if v_user_id is null then
@@ -420,7 +420,7 @@ set search_path = ''
 as $$
 declare
   v_user_id     uuid := auth.uid();
-  v_actor_role  membership_role;
+  v_actor_role  public.membership_role;
   v_target      factory.memberships;
 begin
   if v_user_id is null then
