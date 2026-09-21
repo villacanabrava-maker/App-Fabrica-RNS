@@ -42,10 +42,47 @@ Isto não é uma decisão que me cabe inventar (é schema — `supabase/migratio
 
 **Bloqueador explícito do fiscal, ainda aberto:** "não iniciar a migration como decisão unilateral antes do congelamento documental humano" — a decisão arquitetural (mesmo já validada tecnicamente) precisa ser registrada por um responsável humano e refletida em `docs/02-ARQUITETURA/04-MODELO-DE-DADOS.md` + documentação do fluxo, antes da migration ser escrita. **Não escrevi a migration.** Levado ao usuário para decisão/congelamento — ver comentário da PR #5 e a conversa.
 
+## Nota — segundo gap de RLS/multi-tenant: bootstrap de organização (resolvido)
+
+Ao implementar "criação de organização no primeiro acesso": não existe policy de INSERT em `factory.organizations`, e a única policy de escrita em `factory.memberships` ("admins manage memberships") exige que o usuário já seja owner/admin da organização — impossível para a primeira membership de uma organização nova. Consultado via `/fiscal` na PR #5 antes de escrever a migration.
+
+**Resposta do fiscal** (`request_id: fiscal_e2e3a330b5652c9b5bb3e602`): função `SECURITY DEFINER` é a direção correta (não abrir policy de INSERT direta — permitiria autoelevação em organização já existente). Requisitos: transação única, `auth.uid()` exclusivo, falhar se `NULL`, não aceitar `user_id`/`role`/`organization_id` do cliente, `search_path = ''`, nomes schema-qualificados, `revoke`/`grant` como as funções já existentes, sem novo privilégio de INSERT em tabela. Diferente do caso de convites, esta é **orientação de implementação, não exige congelamento documental humano prévio** — implementado.
+
+**Entregue:** `supabase/migrations/0014_organization_bootstrap.sql` (`factory.create_organization(name, slug)`) e `supabase/tests/organization_bootstrap.sql` (10 testes: bootstrap com sucesso, `user_id = auth.uid()`, `accepted_at` preenchido, anon bloqueado, isolamento entre tenants, autoelevação em org existente bloqueada, insert direto negado, conflito de slug sem órfão). **Não executado localmente** — `supabase test db` precisa de Docker, e o daemon não sobe neste sandbox (`failed to connect to the docker API`, mesmo limite já documentado no Sprint 1.1). Fica para o Database CI real confirmar.
+
+Limite de escopo não resolvido nesta função (documentado, não meu para decidir): limite de organizações por usuário — não há regra canônica documentada; deixado `UNSPECIFIED`.
+
+## Dois gaps novos encontrados, não bloqueantes de segurança entre tenants — registrados como dívida, não resolvidos neste sprint
+
+Achados ao implementar Configurações; diferente dos dois acima, nenhum abre brecha entre organizações (não são escalação de privilégio nem vazamento cross-tenant) — por isso não voltei ao fiscal para mais uma rodada de decisão arquitetural antes de prosseguir, mas também não fingi que funcionam:
+
+1. **`governance.audit_events` não tem policy de INSERT** (só `"org members read audit"`, SELECT). `09-CONFIGURACOES.md` §12 exige "toda alteração de configuração gera audit_event" — as server actions de Configurações (`updateOrganizationGeneral`, `updateMemberRole`, `removeMember`) **não geram audit_event nenhum agora** porque a chamada falharia (RLS bloqueia). Precisa de uma função `SECURITY DEFINER` equivalente à de bootstrap de organização — não escrita ainda.
+2. **Nenhuma constraint/trigger impede uma organização ficar sem owner.** "Não remove/rebaixa o último owner" (09-CONFIGURACOES.md) está implementado só na camada de aplicação (`isLastOwner()` em `server/actions/settings.ts`), checado antes de cada `UPDATE`/`DELETE` — funciona, mas não é a defesa de banco que os outros invariantes do sistema têm (`approvals_must_be_human` etc. são `CHECK CONSTRAINT`). Uma migration com trigger seria mais robusta; não implementada agora.
+
 ## Feito, com evidência verificável
 
-_(preenchido conforme o sprint avança)_
+| Item do checklist | Evidência |
+|---|---|
+| Supabase Auth: e-mail/senha | `server/actions/auth.ts` (`signInWithPassword`, `signUpWithPassword`), páginas `/login`, `/registrar` |
+| Supabase Auth: OAuth GitHub | `signInWithGitHub` + botão real em `/login` — depende do provedor estar habilitado no Supabase Auth (infraestrutura, fora do meu mandato); código não presume que está |
+| Criação de organização no primeiro acesso | `supabase/migrations/0014_organization_bootstrap.sql`, `/organizacao/nova`, `server/actions/organizations.ts` |
+| `/login`, `/registrar`, `/recuperar-senha` | implementadas, com estados de erro/loading/acessibilidade (mostrar senha com `aria-pressed`, erro em `aria-live`) |
+| `/aceitar-convite` | **não implementada** — bloqueada pela decisão de schema de convites (ver nota acima), aguardando o usuário |
+| `/auth/callback` | `app/auth/callback/route.ts`, troca de código OAuth/e-mail por sessão |
+| Shell: AppSidebar, GlobalSearch, NotificationBell, UserMenu | `components/shell/*` — os 9 itens fixos, busca com atalho ⌘K (Base UI Dialog, sem índice de dados ainda — vazio real, não fabricado), sino (Base UI Popover, 0 notificações reais), menu do usuário (Base UI Menu, tema + sair funcionais) |
+| Design system mínimo | `packages/design-system`: tokens resolvidos (`design-system/tokens.json` + gerador `scripts/design-system/build-tokens-css.ts`), Icon, Button, Input, Card, StatusPill, AsyncBoundary, EmptyState, ErrorState |
+| Configurações: Geral | `/configuracoes/geral` — nome/descrição/fuso, RBAC (só owner/admin editam) |
+| Configurações: Equipe | `/configuracoes/equipe` — lista real, alterar papel, remover membro, proteção de último owner; convidar desabilitado (bloqueado, ver acima) |
+| Configurações: Segurança | `/configuracoes/seguranca` — status real de 2FA via `supabase.auth.mfa`; sessões/chaves/log de auditoria claramente marcados como não implementados, não fabricados |
+| RBAC aplicado nas rotas | `src/proxy.ts` (sessão), `(app)/layout.tsx` (organização), `server/queries/rbac.ts` + checks por página (owner/admin para editar) |
 
 ## Pendente
 
-_(preenchido conforme o sprint avança)_
+| Item | Por que não está nesta PR | O que resolve |
+|---|---|---|
+| Storybook configurado | Não iniciado ainda neste round de implementação — próximo passo | Configurar `@storybook/nextjs` + `@storybook/addon-a11y` (já verificados/nas dependências) e escrever stories dos primitivos |
+| `/aceitar-convite/:token` + migration `factory.invites` | Aguardando decisão/congelamento humano (ver nota acima) | Usuário decide; fiscal já validou a abordagem técnica |
+| `governance.audit_events` sem função de escrita seguro | Achado durante Configurações, não é brecha de segurança entre tenants | Função SECURITY DEFINER equivalente à de bootstrap de organização |
+| Proteção de último owner só em nível de aplicação | Idem — funciona, mas não é constraint de banco | Trigger/constraint no banco, mais robusto |
+| `supabase test db` não executado localmente | Docker sem daemon neste sandbox (mesmo limite do Sprint 1.1) | Database CI real confirma `0014_organization_bootstrap.sql` + `organization_bootstrap.sql` |
+| Testes de componente (Storybook), E2E Playwright | Fora do que deu para cobrir neste round | Próximo round + Sprint 1.13 (aceitação da Fase 1) |
