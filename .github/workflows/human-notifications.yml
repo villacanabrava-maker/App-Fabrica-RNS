@@ -1,4 +1,4 @@
-name: Human WhatsApp Notifications
+name: Human Telegram Notifications
 
 on:
   pull_request_target:
@@ -19,7 +19,7 @@ jobs:
       - name: Notificar acao humana
         env:
           BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
-          NOTIFY_SECRET: ${{ secrets.NOTIFICATION_BRIDGE_SECRET }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
           EVENT_KEY: pr-${{ github.event.pull_request.number }}-${{ github.event.action }}-${{ github.event.pull_request.head.sha }}
           TITLE: PR #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}
           URL: ${{ github.event.pull_request.html_url }}
@@ -27,10 +27,23 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           test -n "$BRIDGE_URL" || { echo "::error::FISCAL_BRIDGE_URL ausente"; exit 1; }
-          test -n "$NOTIFY_SECRET" || { echo "::error::NOTIFICATION_BRIDGE_SECRET ausente"; exit 1; }
+          test -n "$BRIDGE_SECRET" || { echo "::error::FISCAL_BRIDGE_SECRET ausente"; exit 1; }
+
           SUMMARY="Evento: $ACTION. Autor/agente: $AUTHOR. Revisar o PR no GitHub; aprovacao e merge continuam exclusivamente humanos."
-          jq -nc --arg event_key "$EVENT_KEY" --arg title "$TITLE" --arg summary "$SUMMARY" --arg url "$URL" '{event_key:$event_key,category:"human_action",severity:"action",title:$title,summary:$summary,url:$url}' > payload.json
-          curl --fail-with-body --silent --show-error -X POST "$BRIDGE_URL/api/notify-whatsapp" -H "Authorization: Bearer $NOTIFY_SECRET" -H "Content-Type: application/json" --data-binary @payload.json
+
+          jq -nc \
+            --arg event_key "$EVENT_KEY" \
+            --arg title "$TITLE" \
+            --arg summary "$SUMMARY" \
+            --arg url "$URL" \
+            '{event_key:$event_key,category:"human_action",severity:"action",title:$title,summary:$summary,url:$url}' \
+            > payload.json
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$BRIDGE_URL/api/notify-telegram" \
+            -H "Authorization: Bearer $BRIDGE_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @payload.json
 
   notify-workflow:
     if: github.event_name == 'workflow_run'
@@ -39,7 +52,7 @@ jobs:
       - name: Notificar conclusao de workflow
         env:
           BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
-          NOTIFY_SECRET: ${{ secrets.NOTIFICATION_BRIDGE_SECRET }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
           EVENT_KEY: workflow-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
           WORKFLOW: ${{ github.event.workflow_run.name }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
@@ -48,8 +61,22 @@ jobs:
           URL: ${{ github.event.workflow_run.html_url }}
         run: |
           test -n "$BRIDGE_URL" || { echo "::error::FISCAL_BRIDGE_URL ausente"; exit 1; }
-          test -n "$NOTIFY_SECRET" || { echo "::error::NOTIFICATION_BRIDGE_SECRET ausente"; exit 1; }
+          test -n "$BRIDGE_SECRET" || { echo "::error::FISCAL_BRIDGE_SECRET ausente"; exit 1; }
+
           SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
           SUMMARY="Workflow $WORKFLOW terminou com status $CONCLUSION. Branch: $BRANCH. SHA: $SHORT_SHA."
-          jq -nc --arg event_key "$EVENT_KEY" --arg title "Fabrica RNS — $WORKFLOW" --arg summary "$SUMMARY" --arg url "$URL" --arg conclusion "$CONCLUSION" '{event_key:$event_key,category:"workflow",severity:(if $conclusion == "success" then "info" else "critical" end),title:$title,summary:$summary,url:$url}' > payload.json
-          curl --fail-with-body --silent --show-error -X POST "$BRIDGE_URL/api/notify-whatsapp" -H "Authorization: Bearer $NOTIFY_SECRET" -H "Content-Type: application/json" --data-binary @payload.json
+
+          jq -nc \
+            --arg event_key "$EVENT_KEY" \
+            --arg title "Fabrica RNS — $WORKFLOW" \
+            --arg summary "$SUMMARY" \
+            --arg url "$URL" \
+            --arg conclusion "$CONCLUSION" \
+            '{event_key:$event_key,category:"workflow",severity:(if $conclusion == "success" then "info" else "critical" end),title:$title,summary:$summary,url:$url}' \
+            > payload.json
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$BRIDGE_URL/api/notify-telegram" \
+            -H "Authorization: Bearer $BRIDGE_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @payload.json
