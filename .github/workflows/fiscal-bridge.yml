@@ -9,77 +9,244 @@ permissions:
   issues: write
   pull-requests: write
 
+concurrency:
+  group: fiscal-bridge-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
 jobs:
   handoff:
     if: startsWith(github.event.comment.body, '/fiscal')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Preparar pedido
-        id: request
-        env:
-          BODY: ${{ github.event.comment.body }}
-          ISSUE_URL: ${{ github.event.issue.html_url }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          COMMENT_URL: ${{ github.event.comment.html_url }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          python - <<'PY' > request.json
-          import json, os
-          body = os.environ["BODY"]
-          request = body[len("/fiscal"):].strip()
-          context = "\n".join([
-              f"Repository: ${{ github.repository }}",
-              f"Thread: {os.environ['ISSUE_URL']}",
-              f"Title: {os.environ['ISSUE_TITLE']}",
-              f"Comment: {os.environ['COMMENT_URL']}",
-              f"Requester: {os.environ['ACTOR']}",
-          ])
-          print(json.dumps({"request": request, "context": context}, ensure_ascii=False))
-          PY
-
-      - name: Chamar agente fiscalizador
-        id: bridge
+      - name: Validar configuração
         env:
           BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
           BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
         run: |
-          if [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_SECRET" ]; then
-            echo "Bridge não configurado: faltam FISCAL_BRIDGE_URL/FISCAL_BRIDGE_SECRET."
-            exit 1
-          fi
+          test -n "$BRIDGE_URL" || { echo "::error::FISCAL_BRIDGE_URL ausente"; exit 1; }
+          test -n "$BRIDGE_SECRET" || { echo "::error::FISCAL_BRIDGE_SECRET ausente"; exit 1; }
+
+      - name: Processar ACK
+        if: startsWith(github.event.comment.body, '/fiscal ack ')
+        env:
+          BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          REQUEST_ID="$(printf '%s' "$BODY" | sed -n 's#^/fiscal ack[[:space:]]\+##p' | awk '{print $1}')"
+          test -n "$REQUEST_ID" || { echo "::error::request_id ausente no ACK"; exit 1; }
 
           curl --fail-with-body --silent --show-error \
-            -X POST "$BRIDGE_URL/api/fiscal-handoff" \
+            -X POST "$BRIDGE_URL/api/fiscal-status" \
             -H "Authorization: Bearer $BRIDGE_SECRET" \
             -H "Content-Type: application/json" \
-            --data-binary @request.json \
-            > response.json
+            --data "$(jq -nc \
+              --arg request_id "$REQUEST_ID" \
+              --arg status "ACKNOWLEDGED" \
+              --arg repository "${{ github.repository }}" \
+              --arg actor "${{ github.actor }}" \
+              --argjson thread_number "${{ github.event.issue.number }}" \
+              --argjson source_comment_id "${{ github.event.comment.id }}" \
+              '{request_id:$request_id,status:$status,repository:$repository,actor:$actor,thread_number:$thread_number,source_comment_id:$source_comment_id,request:"ack"}')"
+
+      - name: Resolver SHA e criar envelope
+        if: "!startsWith(github.event.comment.body, '/fiscal ack ')"
+        id: envelope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.comment.body }}
+          REPOSITORY: ${{ github.repository }}
+          THREAD_NUMBER: ${{ github.event.issue.number }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id }}
+          SOURCE_COMMENT_URL: ${{ github.event.comment.html_url }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ "${{ github.event.issue.pull_request.url }}" != "" ]; then
+            BASE_SHA="$(gh api "repos/$REPOSITORY/pulls/$THREAD_NUMBER" --jq .head.sha)"
+          else
+            DEFAULT_BRANCH="$(gh api "repos/$REPOSITORY" --jq .default_branch)"
+            BASE_SHA="$(gh api "repos/$REPOSITORY/commits/$DEFAULT_BRANCH" --jq .sha)"
+          fi
+
+          REQUEST_TEXT="$(printf '%s' "$BODY" | sed '1s#^/fiscal[[:space:]]*##')"
+          test -n "$REQUEST_TEXT" || { echo "::error::pedido vazio"; exit 1; }
+
+          REQUEST_ID="fiscal_$(printf '%s' "$REPOSITORY|$THREAD_NUMBER|$SOURCE_COMMENT_ID|$BASE_SHA" | sha256sum | cut -c1-24)"
+
+          jq -nc \
+            --arg request_id "$REQUEST_ID" \
+            --arg repository "$REPOSITORY" \
+            --arg base_sha "$BASE_SHA" \
+            --arg actor "$ACTOR" \
+            --arg request "$REQUEST_TEXT" \
+            --arg source_comment_url "$SOURCE_COMMENT_URL" \
+            --argjson thread_number "$THREAD_NUMBER" \
+            --argjson source_comment_id "$SOURCE_COMMENT_ID" \
+            '{request_id:$request_id,repository:$repository,thread_number:$thread_number,source_comment_id:$source_comment_id,source_comment_url:$source_comment_url,base_sha:$base_sha,actor:$actor,request:$request}' \
+            > request.json
+
+          echo "request_id=$REQUEST_ID" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Chamar fiscal com retry idempotente
+        if: "!startsWith(github.event.comment.body, '/fiscal ack ')"
+        id: bridge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
+        run: |
+          success=false
+          for attempt in 1 2 3; do
+            jq --argjson attempt "$attempt" '. + {attempt:$attempt}' request.json > request-attempt.json
+
+            if curl --fail-with-body --silent --show-error \
+              -X POST "$BRIDGE_URL/api/fiscal-handoff" \
+              -H "Authorization: Bearer $BRIDGE_SECRET" \
+              -H "Content-Type: application/json" \
+              --data-binary @request-attempt.json \
+              > response.json; then
+              success=true
+              break
+            fi
+            sleep "$((attempt * 5))"
+          done
+
+          if [ "$success" != "true" ]; then
+            {
+              echo "### Fiscal OpenAI — falha de entrega"
+              echo
+              echo "request_id: \`${{ steps.envelope.outputs.request_id }}\`"
+              echo
+              echo "O Agent Bridge falhou após 3 tentativas. Nenhuma resposta fiscal deve ser considerada publicada."
+            } > failure.md
+            gh api --method POST \
+              "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+              --raw-field body="$(cat failure.md)"
+            exit 1
+          fi
 
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           data = json.load(open("response.json"))
-          answer = data.get("answer", "")
           print("answer<<EOF")
-          print(answer)
+          print(data.get("answer", ""))
           print("EOF")
+          print("request_id=" + data.get("request_id", ""))
+          print("base_sha=" + data.get("base_sha", ""))
           PY
 
-      - name: Publicar resposta no mesmo thread
+      - name: Verificar se o SHA ainda é atual
+        if: "!startsWith(github.event.comment.body, '/fiscal ack ')"
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGINAL_SHA: ${{ steps.bridge.outputs.base_sha }}
+        run: |
+          if [ "${{ github.event.issue.pull_request.url }}" != "" ]; then
+            CURRENT_SHA="$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}" --jq .head.sha)"
+          else
+            DEFAULT_BRANCH="$(gh api "repos/${{ github.repository }}" --jq .default_branch)"
+            CURRENT_SHA="$(gh api "repos/${{ github.repository }}/commits/$DEFAULT_BRANCH" --jq .sha)"
+          fi
+
+          if [ "$CURRENT_SHA" = "$ORIGINAL_SHA" ]; then
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Marcar resposta stale
+        if: "!startsWith(github.event.comment.body, '/fiscal ack ') && steps.freshness.outputs.fresh == 'false'"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
+        run: |
+          jq -nc \
+            --arg request_id "${{ steps.bridge.outputs.request_id }}" \
+            --arg status "STALE" \
+            --arg repository "${{ github.repository }}" \
+            --arg base_sha "${{ steps.bridge.outputs.base_sha }}" \
+            --arg actor "github-actions" \
+            --argjson thread_number "${{ github.event.issue.number }}" \
+            --argjson source_comment_id "${{ github.event.comment.id }}" \
+            '{request_id:$request_id,status:$status,repository:$repository,base_sha:$base_sha,actor:$actor,thread_number:$thread_number,source_comment_id:$source_comment_id,request:"sha_changed_before_publish"}' \
+            > stale.json
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$BRIDGE_URL/api/fiscal-status" \
+            -H "Authorization: Bearer $BRIDGE_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @stale.json
+
+          gh api --method POST \
+            "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            --raw-field body="### Fiscal OpenAI — resposta invalidada
+
+request_id: \`${{ steps.bridge.outputs.request_id }}\`
+
+O SHA mudou antes da publicação. Execute novamente \`/fiscal <pedido>\` sobre o estado atual."
+
+      - name: Publicar e confirmar read-after-write
+        if: "!startsWith(github.event.comment.body, '/fiscal ack ') && steps.freshness.outputs.fresh == 'true'"
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           ANSWER: ${{ steps.bridge.outputs.answer }}
+          REQUEST_ID: ${{ steps.bridge.outputs.request_id }}
+          BASE_SHA: ${{ steps.bridge.outputs.base_sha }}
         run: |
           {
             echo "### Fiscal OpenAI"
             echo
+            echo "**request_id:** \`$REQUEST_ID\`"
+            echo "**base_sha:** \`$BASE_SHA\`"
+            echo
             printf '%s\n' "$ANSWER"
             echo
             echo "---"
-            echo "_Resposta automática do Agent Bridge. Aprovação/merge continuam exclusivamente humanos._"
+            echo "Para confirmar leitura: \`/fiscal ack $REQUEST_ID\`"
+            echo
+            echo "<!-- rns-fiscal request_id=$REQUEST_ID base_sha=$BASE_SHA -->"
           } > comment.md
 
-          gh api \
-            --method POST \
+          gh api --method POST \
             "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
-            -f body=@comment.md
+            --raw-field body="$(cat comment.md)" \
+            > created.json
+
+          COMMENT_ID="$(jq -r .id created.json)"
+          COMMENT_URL="$(jq -r .html_url created.json)"
+
+          gh api "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" > confirmed.json
+          jq -e --arg marker "rns-fiscal request_id=$REQUEST_ID base_sha=$BASE_SHA" '.body | contains($marker)' confirmed.json >/dev/null
+
+          echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "comment_url=$COMMENT_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Registrar publicação confirmada
+        if: "!startsWith(github.event.comment.body, '/fiscal ack ') && steps.freshness.outputs.fresh == 'true'"
+        env:
+          BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
+        run: |
+          jq -nc \
+            --arg request_id "${{ steps.bridge.outputs.request_id }}" \
+            --arg status "PUBLISHED" \
+            --arg repository "${{ github.repository }}" \
+            --arg base_sha "${{ steps.bridge.outputs.base_sha }}" \
+            --arg actor "github-actions" \
+            --arg github_comment_url "${{ steps.publish.outputs.comment_url }}" \
+            --argjson github_comment_id "${{ steps.publish.outputs.comment_id }}" \
+            --argjson thread_number "${{ github.event.issue.number }}" \
+            --argjson source_comment_id "${{ github.event.comment.id }}" \
+            '{request_id:$request_id,status:$status,repository:$repository,base_sha:$base_sha,actor:$actor,thread_number:$thread_number,source_comment_id:$source_comment_id,request:"read_after_write_confirmed",github_comment_id:$github_comment_id,github_comment_url:$github_comment_url}' \
+            > published.json
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$BRIDGE_URL/api/fiscal-status" \
+            -H "Authorization: Bearer $BRIDGE_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @published.json
