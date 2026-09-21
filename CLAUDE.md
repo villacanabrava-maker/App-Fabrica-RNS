@@ -31,9 +31,12 @@ Quando precisar de revisão técnica, validação de aderência ao plano ou uma 
 
 1. Use a issue ou pull request relacionada à tarefa.
 2. Publique um comentário começando por `/fiscal ` seguido do pedido.
-3. Aguarde a resposta automática no mesmo thread.
-4. Nunca solicite, leia, copie ou armazene `OPENAI_API_KEY`, `SUPABASE_SECRET_KEY`, `VERCEL_TOKEN`, `FISCAL_BRIDGE_SECRET` ou qualquer outro segredo.
-5. O fiscal pode revisar, comentar e orientar/operar infraestrutura autorizada, mas nunca aprova nem faz merge de PRs.
-6. Se o bridge estiver indisponível, registre o bloqueio no thread e não invente credenciais nem contorne o mecanismo.
+3. Aguarde a resposta automática no mesmo thread. A resposta válida sempre contém `request_id` e `base_sha`.
+4. Depois de ler uma resposta válida, confirme recebimento no mesmo thread com `/fiscal ack <request_id>`.
+5. Nunca solicite, leia, copie ou armazene `OPENAI_API_KEY`, `SUPABASE_SECRET_KEY`, `VERCEL_TOKEN`, `FISCAL_BRIDGE_SECRET` ou qualquer outro segredo.
+6. O fiscal pode revisar, comentar e orientar/operar infraestrutura autorizada, mas nunca aprova nem faz merge de PRs.
+7. Se o bridge estiver indisponível, registre o bloqueio no thread e não invente credenciais nem contorne o mecanismo.
 
 Documentação operacional: `docs/09-OPERACOES/AGENT-BRIDGE.md`.
+
+8. Nunca considere uma revisão publicada apenas porque uma chamada foi tentada: confirme o comentário live no GitHub e o `base_sha`. Se o SHA tiver mudado, solicite nova fiscalização.
