@@ -170,6 +170,7 @@ select throws_ok(
 reset role;
 create temp table t_invite_for_b_test as
   select * from factory.invites where organization_id = 'aa000000-0000-0000-0000-000000000001' and email = 'outro@membro.test';
+grant select on t_invite_for_b_test to authenticated;
 
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"b1000000-0000-0000-0000-000000000001"}', true);
@@ -180,6 +181,9 @@ select throws_ok(
   '18. owner de outro tenant não revoga convite da Org A, mesmo sabendo o id'
 );
 
+-- Volta a um membro da Org A: quem checou acima (owner da Org B) não
+-- enxerga audit_events da Org A via RLS — contaria 0 mesmo com o insert ok.
+reset role;
 select is(
   (select count(*)::int from governance.audit_events
     where organization_id = 'aa000000-0000-0000-0000-000000000001' and action = 'invite.revoked'),
@@ -238,11 +242,17 @@ select is((select user_id from t_membership_accepted), 'c1000000-0000-0000-0000-
 select is((select role from t_membership_accepted), 'engineer'::membership_role, '26. accept_invite atribui o papel definido no convite');
 select isnt((select accepted_at from t_membership_accepted), null, '27. membership criada via aceite já vem com accepted_at preenchido');
 
+-- factory.invites só é legível por owner/admin (policy "admins read
+-- invites") — o próprio invitee virou engineer, não enxergaria a linha.
+reset role;
 select is(
   (select status from factory.invites where id = (select id from t_invite_invitee)),
   'accepted'::invite_status,
   '28. convite aceito muda de status para "accepted"'
 );
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"c1000000-0000-0000-0000-000000000001"}', true);
 
 select throws_ok(
   $$ select factory.accept_invite((select token from t_invite_invitee)) $$,
@@ -272,6 +282,7 @@ select throws_ok(
   '31. convite com expires_at no passado é rejeitado'
 );
 
+reset role;
 select is(
   (select status from factory.invites where id = 'e1000000-0000-0000-0000-000000000001'),
   'expired'::invite_status,
@@ -373,6 +384,9 @@ select throws_ok(
   null, 'último owner da organização não pode ser removido nem rebaixado',
   '42. último owner continua protegido pelo trigger de 0015 mesmo passando pela RPC'
 );
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000002"}', true);
 
 select lives_ok(
   $$ select factory.remove_member(
