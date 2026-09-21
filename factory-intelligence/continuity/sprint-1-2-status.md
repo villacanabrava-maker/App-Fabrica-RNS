@@ -108,6 +108,8 @@ O `supabase test db` do Database CI (que roda de verdade, com Docker, diferente 
 
 Nenhuma mudança em `supabase/migrations/**` — a política de RLS ("admins manage memberships") já estava correta; só os testes tinham suposições erradas sobre como a RLS se comporta. `plan(10)` → `plan(11)` (um caso a mais). Não pude confirmar localmente (mesmo limite de Docker) — fica para o próximo run do Database CI provar de verdade.
 
+**Rodada seguinte do Database CI (commit `f10ea70`) confirmou o essencial e pegou um erro meu**: o teste 9 (autoelevação via `t_org_a`) passou — a correção acima estava certa. Mas o teste do caso "anon" voltou a falhar, agora com "no exception" em vez do 42501 esperado: ao reescrever aquele bloco eu apaguei sem querer o `set local role anon;` que precede a chamada, então o teste rodava como `authenticated`/usuário A (ainda em efeito da seção 1) e a chamada simplesmente tinha sucesso, criando mais uma organização de verdade. Não é achado de produto — foi eu mesmo cortando uma linha durante a reescrita. Corrigido devolvendo o `set local role anon;`.
+
 ## Estado final do sprint
 
 Todos os itens do checklist original estão entregues, exceto `/aceitar-convite` (bloqueado por decisão humana pendente, não por trabalho faltando) — ver nota acima. A "SAÍDA" pedida (entrar, criar organização, convidar membro, alterar papel) está coberta parcialmente: entrar/criar organização/alterar papel funcionam ponta a ponta; "convidar membro" só cobre convidar alguém que já tem conta (o botão de convite por e-mail fica desabilitado, propositalmente, até a decisão de schema).

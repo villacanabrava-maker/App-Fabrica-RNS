@@ -71,6 +71,9 @@ create temp table t_org_a as
 -- privilégio de `authenticated` mas sem claim "sub" no JWT (auth.uid()
 -- nulo) — cenário que a Data API pode produzir e que `anon` sozinho
 -- não exercita.
+set local role anon;
+select set_config('request.jwt.claims', '', true);
+
 select throws_ok(
   $$ select factory.create_organization('Organização Anônima', 'org-anon') $$,
   '42501', null,
