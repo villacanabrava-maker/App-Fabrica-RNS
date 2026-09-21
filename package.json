@@ -1,0 +1,28 @@
+{
+  "name": "rns-factory",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @rns/control-plane dev",
+    "build": "pnpm -r --if-present run build",
+    "lint": "pnpm -r --if-present run lint",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test:unit": "vitest run packages",
+    "test:integration": "vitest run tests/integration --passWithNoTests",
+    "test:storybook": "pnpm --filter @rns/control-plane --if-present run test:storybook",
+    "test:e2e": "pnpm --filter @rns/control-plane --if-present run test:e2e",
+    "check-public-env": "tsx scripts/check-public-env.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "5.0.1",
+    "tsx": "^4.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}

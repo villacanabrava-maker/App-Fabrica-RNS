@@ -1,0 +1,19 @@
+{
+  "name": "@rns/policy-engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}
