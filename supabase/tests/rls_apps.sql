@@ -5,7 +5,7 @@
 --   É provar que a organização A vê ZERO linhas da organização B.
 -- ============================================================
 begin;
-select plan(6);
+select plan(7);
 
 -- Duas organizações, dois usuários
 insert into factory.organizations (id, name, slug) values
@@ -35,6 +35,19 @@ insert into factory.apps (organization_id, name, slug) values
 set local role authenticated;
 select set_config('request.jwt.claims',
   '{"sub":"aaaaaaaa-1111-1111-1111-111111111111"}', true);
+
+-- ★ Regressão: factory.user_organizations()/user_has_role() chamadas
+--   pela policy de factory.memberships não podem reconsultar a
+--   própria factory.memberships sob a mesma policy — isso é
+--   "infinite recursion detected in policy for relation
+--   \"memberships\"". Corrigido tornando as funções SECURITY DEFINER
+--   (ver 0002_identity_and_apps.sql). Como toda outra policy do
+--   sistema depende dessas funções, este é o teste mais fundamental
+--   do arquivo: se ele travar, tudo mais trava junto.
+select lives_ok(
+  $$ select count(*) from factory.memberships $$,
+  'consultar memberships nao recursiona pela propria policy'
+);
 
 select is(
   (select count(*) from factory.apps),

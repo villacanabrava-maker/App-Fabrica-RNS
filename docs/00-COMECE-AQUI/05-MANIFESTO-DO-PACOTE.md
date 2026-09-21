@@ -33,14 +33,14 @@ Herdado e refeito a partir do manifesto da Pasta Mãe Mestre v1.0, agora descrev
 | `factory-intelligence/skills/` | 5 Markdown (`SKILL.md` por skill) |
 | `factory-intelligence/registry/` | 4 YAML |
 | `factory-intelligence/schemas/` | 6 JSON Schema |
-| `supabase/migrations/` | 10 SQL |
-| `supabase/tests/` | 2 SQL |
+| `supabase/migrations/` | 11 SQL (10 originais + `0011_multi_tenant_referential_integrity.sql`, adicionada em revisão técnica antes do merge) |
+| `supabase/tests/` | 3 SQL (2 originais + `multi_tenant_referential_integrity.sql`) |
 | `packages/contracts/` | 3 TypeScript |
 | `design-system/tokens.json` | 1 JSON |
 | `.github/workflows/` | 6 YAML |
-| **Total no scaffold de código** | **40** |
+| **Total no scaffold de código** | **42** |
 
-**Total geral do pacote fundido:** 120 arquivos novos (80 em `docs/`, 40 na raiz do repositório), mais os ajustes de merge em `README.md`, `AGENTS.md`, `CLAUDE.md` e `.github/CODEOWNERS` já existentes no repositório.
+**Total geral do pacote fundido:** 122 arquivos novos (80 em `docs/`, 42 na raiz do repositório), mais os ajustes de merge em `README.md`, `AGENTS.md`, `CLAUDE.md` e `.github/CODEOWNERS` já existentes no repositório.
 
 ## Integridade lógica — verificado nesta fusão
 
@@ -49,7 +49,7 @@ Herdado e refeito a partir do manifesto da Pasta Mãe Mestre v1.0, agora descrev
 | 6 JSON Schemas (`factory-intelligence/schemas/`) + `design-system/tokens.json` | parse válido (Python `json`) |
 | 4 registries YAML (`factory-intelligence/registry/`) | parse válido (`pyyaml`) |
 | 6 workflows YAML (`.github/workflows/`) | parse válido (`pyyaml`) |
-| 10 migrations + 2 arquivos de teste SQL | presentes, não truncados, terminam em statement completo |
+| 11 migrations + 3 arquivos de teste SQL | presentes, não truncados, terminam em statement completo |
 | 3 contratos TypeScript | chaves e parênteses balanceados |
 | 10 imagens PNG | assinatura de arquivo PNG válida em todas |
 | Varredura por padrões de segredo (`sk-`, `AKIA`, chave privada PEM, `sb_secret_`) em todo conteúdo novo | nenhuma ocorrência |

@@ -193,6 +193,7 @@ Pacote Mestre de Construção da Fábrica Apps RNS · versão 2.0 (fusão) · 21
 - `/packages/contracts/state-machines.ts`
 - `/packages/contracts/task-packet.ts`
 - `/supabase/migrations/0001_schemas_and_types.sql` … `0010_seed_roles.sql`
+- `/supabase/migrations/0011_multi_tenant_referential_integrity.sql` — FKs compostas (organization_id, parent_id); adicionada após revisão técnica na PR de fusão, ver `01-PRODUTO/04-DECISOES-CONGELADAS.md`
 - `/supabase/tests/invariants.sql`
 - `/supabase/tests/rls_apps.sql`
 

@@ -39,10 +39,29 @@ create table factory.memberships (
 
 create index on factory.memberships (user_id) where accepted_at is not null;
 
--- Funções auxiliares. SECURITY INVOKER, nunca DEFINER.
+-- Funções auxiliares.
+--
+-- ★ SECURITY DEFINER, deliberadamente — não INVOKER.
+-- As policies de RLS de factory.memberships (ver 0009) chamam estas
+-- funções. Se elas rodassem como INVOKER, a consulta interna a
+-- factory.memberships voltaria a aplicar a própria policy de
+-- memberships, que chama a função de novo: "infinite recursion
+-- detected in policy for relation \"memberships\"" — e quebraria toda
+-- policy do sistema, porque praticamente todas dependem destas duas
+-- funções. SECURITY DEFINER roda com o privilégio do dono da função
+-- (o role de migração, dono também da tabela, que por padrão já
+-- ignora RLS em suas próprias tabelas), rompendo o ciclo.
+-- search_path fixo em '' é obrigatório com SECURITY DEFINER — sem
+-- isso, um objeto malicioso criado antes na busca de schema do
+-- chamador poderia sequestrar a função. Todas as referências no corpo
+-- já são schema-qualificadas.
+-- A função só enxerga as próprias memberships do chamador (auth.uid()
+-- não é parâmetro, não pode ser falsificado), então o bypass de RLS
+-- aqui dentro não vaza dado de outro usuário.
 create or replace function factory.user_organizations()
 returns setof uuid
-language sql stable security invoker
+language sql stable security definer
+set search_path = ''
 as $$
   select organization_id
   from factory.memberships
@@ -52,7 +71,8 @@ $$;
 
 create or replace function factory.user_has_role(org uuid, required membership_role[])
 returns boolean
-language sql stable security invoker
+language sql stable security definer
+set search_path = ''
 as $$
   select exists (
     select 1 from factory.memberships
@@ -62,6 +82,12 @@ as $$
       and role = any(required)
   )
 $$;
+
+revoke all on function factory.user_organizations() from public;
+grant execute on function factory.user_organizations() to authenticated;
+
+revoke all on function factory.user_has_role(uuid, membership_role[]) from public;
+grant execute on function factory.user_has_role(uuid, membership_role[]) to authenticated;
 
 -- ---------- Aplicativos (na UI: "Projetos") ----------
 create table factory.apps (
