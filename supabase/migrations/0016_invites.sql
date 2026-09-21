@@ -149,8 +149,8 @@ begin
     raise exception 'já existe um convite pendente para este e-mail — revogue antes de criar outro';
   end if;
 
-  v_token := encode(gen_random_bytes(32), 'hex');
-  v_hash  := encode(digest(v_token, 'sha256'), 'hex');
+  v_token := encode(extensions.gen_random_bytes(32), 'hex');
+  v_hash  := encode(extensions.digest(v_token, 'sha256'), 'hex');
 
   insert into factory.invites (organization_id, email, role, token_hash, invited_by, expires_at)
   values (p_organization_id, v_email, p_role, v_hash, v_user_id, now() + interval '7 days')
@@ -227,7 +227,7 @@ as $$
   select o.name, i.email, i.role, i.status, i.expires_at
   from factory.invites i
   join factory.organizations o on o.id = i.organization_id
-  where i.token_hash = encode(digest(p_token, 'sha256'), 'hex')
+  where i.token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
 $$;
 
 revoke all on function factory.get_invite_preview(text) from public;
@@ -257,7 +257,7 @@ begin
 
   select * into v_invite
     from factory.invites
-   where token_hash = encode(digest(p_token, 'sha256'), 'hex')
+   where token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
    for update;
 
   if not found then
