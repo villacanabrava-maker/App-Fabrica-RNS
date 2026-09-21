@@ -3,25 +3,14 @@ import { isShellCommandAllowed } from '../src/shell';
 import type { ShellPolicy } from '../src/types';
 
 // Mesmo shape de workspace_write em factory-intelligence/registry/permissions.yaml:
-// `git`, `npm`, `pnpm` etc. liberados por inteiro (a ferramenta toda), mas
-// seus executores embutidos de código/pacote arbitrário vão para deny.
+// `git`, `npm`, `pnpm` etc. liberados por inteiro (a ferramenta toda). A
+// defesa contra os executores embutidos de node/npm/pnpm/npx vive em
+// isShellCommandAllowed (capability check), não como entradas de deny
+// aqui — ver describe "executores genéricos com capacidade de execução
+// arbitrária" abaixo.
 const workspaceWrite: ShellPolicy = {
-  allow: ['git', 'npm', 'pnpm', 'node', 'tsc', 'vitest', 'ls', 'cat', 'grep', 'find', 'mkdir', 'touch'],
-  deny: [
-    'sudo',
-    'chmod 777',
-    'curl * | sh',
-    'wget * | sh',
-    'ssh',
-    'rm -rf /',
-    'node -e**',
-    'node --eval**',
-    'npm exec**',
-    'npm x**',
-    'npx**',
-    'pnpm exec**',
-    'pnpm dlx**',
-  ],
+  allow: ['git', 'npm', 'pnpm', 'node', 'npx', 'tsc', 'vitest', 'ls', 'cat', 'grep', 'find', 'mkdir', 'touch'],
+  deny: ['sudo', 'chmod 777', 'curl * | sh', 'wget * | sh', 'ssh', 'rm -rf /'],
 };
 
 const readOnly: ShellPolicy = {
@@ -84,42 +73,54 @@ describe('isShellCommandAllowed — injeção via metacaracteres de shell (regre
   });
 });
 
-// ★ Achado do fiscal (revalidação após b083cc3): a correção de
-// metacaracteres não bloqueava os EXECUTORES EMBUTIDOS de `node`, `npm`,
-// `pnpm` e `npx` — capacidades que rodam código/pacote arbitrário sem
-// nenhum metacaractere de shell. `node -e "<qualquer JS>"` roda JS
-// arbitrário; `npx <pacote>`/`pnpm dlx <pacote>` baixam e rodam qualquer
-// pacote; `npm exec`/`npm x`/`pnpm exec` fazem o mesmo. Como o primeiro
-// token (`node`, `npm`, `pnpm`) estava liberado por inteiro, esses
-// comandos passavam mesmo com a defesa de metacaracteres já corrigida.
-describe('isShellCommandAllowed — executores embutidos de código/pacote arbitrário (regressão)', () => {
-  const embeddedExecutorVectors = [
-    'node -e "require(\'child_process\').execSync(\'rm -rf /\')"',
-    "node -e \"console.log('pwned')\"",
-    'node --eval "process.exit(1)"',
-    'npm exec -- rm -rf /',
-    'npm exec left-pad',
-    'npm x left-pad',
-    'npx left-pad',
-    'npx --yes malicious-package',
+// ★ Achado do fiscal (revalidação após b083cc3, item 4): o atalho "ferramenta
+// liberada por inteiro" tratava `node`, `npm`, `pnpm` e `npx` como qualquer
+// outra ferramenta — mas essas têm, embutida, uma forma de executar código
+// ou pacote arbitrário sem nenhum metacaractere de shell. `node -e/--eval`
+// roda JS arbitrário; `npx`/`pnpm dlx` baixam e rodam qualquer pacote;
+// `npm exec`/`npm x`/`pnpm exec` fazem o mesmo. Estes testes travam a
+// correção por capability (packages/policy-engine/src/shell.ts,
+// `isDangerousGenericExecutorInvocation`), não por lista de flags no
+// registry — dois vetores extras (linha "-- rm -rf /" e um `pnpm exec`
+// aninhado rodando outro executor perigoso) somados aos da correção
+// original para cobrir formas compostas do mesmo problema.
+describe('isShellCommandAllowed — executores genéricos com capacidade de execução arbitrária (regressão)', () => {
+  const dangerousInvocations = [
+    'node -e "require(\'child_process\').execSync(\'id\')"',
+    'node --eval "require(\'child_process\').execSync(\'id\')"',
+    'node --eval=require("child_process").execSync("id")',
+    'node -p "1+1"',
+    'node --print "1+1"',
+    'npm exec cowsay hi',
+    'npm exec -- cowsay hi',
+    'npm x cowsay hi',
+    'npx cowsay hi',
+    'npx -y cowsay hi',
+    'npx --yes cowsay hi',
+    'pnpm exec cowsay hi',
     'pnpm exec node -e "1"',
-    'pnpm dlx malicious-package',
+    'pnpm dlx cowsay hi',
   ];
 
-  for (const command of embeddedExecutorVectors) {
-    it(`nega "${command}" mesmo com o primeiro token (node/npm/pnpm) liberado por inteiro`, () => {
+  for (const command of dangerousInvocations) {
+    it(`nega "${command}" mesmo com o primeiro token (ferramenta) liberado por inteiro`, () => {
       expect(isShellCommandAllowed(command, workspaceWrite)).toBe(false);
     });
   }
 
-  it('continua liberando node/npm/pnpm para os usos reais do workspace (sem executor embutido)', () => {
-    expect(isShellCommandAllowed('node dist/worker.js', workspaceWrite)).toBe(true);
-    expect(isShellCommandAllowed('npm run build', workspaceWrite)).toBe(true);
-    expect(isShellCommandAllowed('pnpm install', workspaceWrite)).toBe(true);
+  it('libera as ferramentas sozinhas, sem argumento (help/no-op, inofensivo)', () => {
+    expect(isShellCommandAllowed('node', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('npm', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('npx', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('pnpm', workspaceWrite)).toBe(true);
   });
 
-  it('npx nunca é liberado, nem sozinho', () => {
-    expect(isShellCommandAllowed('npx', workspaceWrite)).toBe(false);
+  it('continua liberando uso legítimo destas ferramentas (não é o vetor reportado)', () => {
+    expect(isShellCommandAllowed('npm install', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('npm run build', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('pnpm build', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('pnpm test', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('node script.js', workspaceWrite)).toBe(true);
   });
 });
 

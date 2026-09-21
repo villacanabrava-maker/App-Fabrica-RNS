@@ -69,13 +69,8 @@ profiles:
     network: package_registries
     production: deny
     shell:
-      # node/npm/pnpm ficam liberados como ferramenta, mas seus executores
-      # embutidos de código/pacote arbitrário (node -e/--eval, npm exec/x,
-      # pnpm exec/dlx) vão para deny — sem isso, liberar a ferramenta por
-      # inteiro também libera execução arbitrária sem metacaracteres de
-      # shell. npx nunca é liberado.
       allow: [git, npm, pnpm, node, tsc, vitest, playwright]
-      deny:  [sudo, chmod 777, "curl * | sh", ssh, "node -e**", "node --eval**", "npm exec**", "npm x**", "npx**", "pnpm exec**", "pnpm dlx**"]
+      deny:  [sudo, chmod 777, "curl * | sh", ssh]
 
   test_workspace:
     extends: workspace_write
