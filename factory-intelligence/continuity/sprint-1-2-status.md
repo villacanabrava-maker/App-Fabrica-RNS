@@ -131,7 +131,18 @@ Fiscalização completa (`request_id fiscal_7aefb81016cdbd4594cd9ee2`) pegou alg
 - **Slug global permite descobrir existência de organização de outro tenant via erro `23505`** — `factory.organizations.slug` já é `unique` (globalmente, não por tenant) desde `0002_identity_and_apps.sql`, antes desta migration. Não decido sozinho se isso deveria mudar (relaxar para unicidade por-tenant seria uma mudança de modelo de dados mais ampla); registrado, não inventada solução.
 - **`returns factory.organizations` acopla o contrato do RPC à tabela inteira** — crítica de design de API válida, mas mudar o contrato de retorno (ou de mensagens de erro) é uma decisão que afetaria o padrão de todas as funções RPC do sistema, não só esta — fora do escopo de uma correção pontual nesta migration.
 
-Database CI ainda não confirmou o head com essas 2 correções — fica para o próximo run.
+Database CI confirmou o head com essas 2 correções: `dee525c`, `Files=5, Tests=40, Result: PASS` (34 anteriores + 6 novos em `organization_bootstrap.sql`, 11→17 casos).
+
+## Fiscalização da migration encerrada — sem bloqueador técnico novo
+
+Terceira rodada (`request_id fiscal_41bea400ecc05e4c03f0090f`, evidência completa: base/head explícitos, `git diff --name-status`, delta desde o último CI verde, run+log real do Database CI, migration e teste integrais, DDL de `factory.organizations`, confirmação de ausência de `FORCE ROW LEVEL SECURITY`): **os 5 itens de evidência pedidos na rodada anterior fecharam sem novo bloqueador técnico**. Ressalva do próprio parecer: a fiscalização é sobre o conteúdo reproduzido no comentário, não uma verificação live independente do GitHub — essa conferência continua sendo humana, como o protocolo já previa. Não é aprovação nem autorização de merge.
+
+Resumo de 3 rodadas de fiscalização completa desta migration:
+1. Achado real corrigido — comentário da migration divergia do código (limite de organizações por usuário não era imposto, mas o texto dizia que sim).
+2. 2 gaps de teste reais corrigidos — rollback (atomicidade) nunca testado; ACL da função nunca verificada no catálogo (só no texto do `grant`/`revoke`).
+3. 2 pontos de design registrados como dívida pré-existente, sem mudança de código — descoberta de slug via `23505` (característica do schema desde `0002`, não desta migration); `returns factory.organizations` acopla contrato à tabela inteira (mudança de padrão system-wide, fora do escopo de uma migration pontual).
+
+`supabase/migrations/0014_organization_bootstrap.sql` é a única mudança em caminho privilegiado (`supabase/migrations/**`) deste sprint — considero a fiscalização desse caminho materialmente completa. RBAC de rotas (`canManageOrganization`) e auth flows não passam pelo mesmo gate de `/fiscal` (não envolvem `SECURITY DEFINER`/RLS), foram revisados diretamente durante a implementação (ver seção "Revisão final de RBAC" acima).
 
 ## Estado final do sprint
 
