@@ -68,6 +68,25 @@ alter table integration.deployments           enable row level security;
 alter table integration.deployment_checks     enable row level security;
 alter table integration.release_decisions     enable row level security;
 
+-- ---------- Privilégios de base ----------
+-- ★ RLS FILTRA linhas; ela não CONCEDE acesso. Sem o GRANT de schema
+--   e de tabela abaixo, toda query de `authenticated` nestes schemas
+--   falha com "permission denied for schema x" antes mesmo da policy
+--   ser avaliada — nenhuma das migrations anteriores concedia isso.
+--   DELETE fica deliberadamente FORA do grant amplo: "sem policy de
+--   DELETE = ninguém apaga pela Data API" (cabeçalho deste arquivo)
+--   vale tanto para a policy quanto para o privilégio de base. Nunca
+--   concedido a `anon`: nenhuma policy deste arquivo é `to anon`.
+grant usage on schema factory, workflow, agents, review, governance, integration
+  to authenticated;
+
+grant select, insert, update on all tables in schema factory      to authenticated;
+grant select, insert, update on all tables in schema workflow     to authenticated;
+grant select, insert, update on all tables in schema agents       to authenticated;
+grant select, insert, update on all tables in schema review       to authenticated;
+grant select, insert, update on all tables in schema governance   to authenticated;
+grant select, insert, update on all tables in schema integration  to authenticated;
+
 -- ---------- Organizações e membros ----------
 create policy "members read own organization"
 on factory.organizations for select to authenticated
