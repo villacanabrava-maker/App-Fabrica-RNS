@@ -3,6 +3,8 @@
 -- No table privileges are granted to anon/authenticated; writes go only
 -- through SECURITY DEFINER RPCs protected by the shared bridge secret.
 
+create schema if not exists integration;
+create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists integration.agent_bridge_settings (
