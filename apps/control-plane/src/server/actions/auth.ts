@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { sanitizeRedirectPath } from '@/lib/redirect';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { siteUrl } from '@/lib/supabase/env';
 
 export interface ActionState {
   error?: string;
@@ -56,9 +57,13 @@ export async function requestPasswordReset(_prev: ActionState, formData: FormDat
   const supabase = await createSupabaseServerClient();
 
   // Erro nunca é revelado ao chamador: mesma resposta exista ou não o e-mail.
-  await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/auth/callback?next=/configuracoes/seguranca`,
+  // Logado no servidor para não mascarar falha operacional (ex.: SMTP fora do ar).
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${siteUrl()}/auth/callback?next=/configuracoes/seguranca`,
   });
+  if (error) {
+    console.error('[requestPasswordReset] falha ao solicitar reset:', error.message);
+  }
 
   return { success: true };
 }
@@ -69,7 +74,7 @@ export async function signInWithGitHub(formData: FormData): Promise<never> {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/auth/callback?next=${encodeURIComponent(next)}`,
+      redirectTo: `${siteUrl()}/auth/callback?next=${encodeURIComponent(next)}`,
     },
   });
 

@@ -23,10 +23,11 @@
 -- ao tentar alterar/remover uma linha de owner, a linha é invisível para a
 -- policy e a operação afeta 0 linhas.
 --
--- Observação: hoje `authenticated` só tem GRANT select/insert/update (0009),
--- então DELETE direto já é barrado por privilégio. A policy de DELETE abaixo
--- é defesa em profundidade para o dia em que esse grant existir (os testes
--- pgTAP concedem DELETE dentro da transação de teste para exercitá-la).
+-- Correção (Fiscal R1, achado 1): `authenticated` só tinha GRANT
+-- select/insert/update (0009) — `removeMember()` (settings.ts) faz DELETE
+-- via cliente autenticado e falhava sempre (42501, privilégio de tabela
+-- ausente), mesmo para owner. A policy de DELETE só filtra linhas; sem o
+-- GRANT abaixo ela nunca chega a ser avaliada.
 --
 -- Migration histórica NÃO é editada: 0009 permanece como foi aplicada; aqui
 -- a policy antiga é removida e substituída por três policies separadas.
@@ -66,6 +67,8 @@ using (
   or (factory.user_has_role(organization_id, array['admin']::membership_role[]) and role <> 'owner')
 );
 
+grant delete on factory.memberships to authenticated;
+
 -- ---------- Último owner protegido no banco ----------
 -- SECURITY DEFINER + search_path vazio (mesmo padrão de 0002/0014): a
 -- contagem de owners precisa enxergar todas as linhas da organização,
@@ -89,12 +92,18 @@ begin
       return case when tg_op = 'DELETE' then old else new end;
     end if;
 
+    -- FOR UPDATE: sem lock, duas remoções/rebaixamentos concorrentes de
+    -- owners distintos (mesma organização) cada uma veria a outra ainda
+    -- não commitada como "owner restante" e ambas passariam, zerando os
+    -- owners (Fiscal R1, achado 2). O lock serializa: a segunda transação
+    -- espera a primeira commitar e reavalia o estado já atualizado.
     if not exists (
       select 1 from factory.memberships
        where organization_id = old.organization_id
          and id <> old.id
          and role = 'owner'
          and accepted_at is not null
+       for update
     ) then
       raise exception 'último owner da organização não pode ser removido nem rebaixado';
     end if;

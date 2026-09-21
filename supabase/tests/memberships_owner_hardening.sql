@@ -8,10 +8,6 @@
 begin;
 select plan(22);
 
--- authenticated não tem GRANT DELETE hoje (0009: select, insert, update). Concedido só dentro desta
--- transação de teste (revertida no rollback) para exercitar a policy de DELETE e o trigger de último owner.
-grant delete on factory.memberships to authenticated;
-
 -- Conta linhas afetadas por um DML (CTE de escrita não pode ficar dentro de subselect).
 -- Função temporária: some com o rollback; roda como o papel ativo (RLS aplicado).
 create function pg_temp.affected_rows(p_sql text) returns integer

@@ -94,7 +94,7 @@ Achado adicional, corrigido: `removeMember` (`server/actions/settings.ts`) não 
 |---|---|---|
 | `/aceitar-convite/:token` + migration `factory.invites` | Aguardando decisão/congelamento humano (ver nota acima) | Usuário decide; fiscal já validou a abordagem técnica |
 | `governance.audit_events` sem função de escrita seguro | Achado durante Configurações, não é brecha de segurança entre tenants | Função SECURITY DEFINER equivalente à de bootstrap de organização |
-| Proteção de último owner só em nível de aplicação | Idem — funciona, mas não é constraint de banco | Trigger/constraint no banco, mais robusto |
+| ~~Proteção de último owner só em nível de aplicação~~ | Resolvido em `0015_memberships_owner_hardening.sql` (trigger `protect_last_owner`, com lock `FOR UPDATE` contra corrida — ver seção "Fiscal R1" abaixo) | — |
 | `supabase test db` não executado localmente | Docker sem daemon neste sandbox (mesmo limite do Sprint 1.1) | Database CI real confirma `0014_organization_bootstrap.sql` + `organization_bootstrap.sql` |
 | Testes de componente (interaction tests), E2E Playwright | Fora do que deu para cobrir neste round | Próximo round + Sprint 1.13 (aceitação da Fase 1) |
 
@@ -143,6 +143,17 @@ Resumo de 3 rodadas de fiscalização completa desta migration:
 3. 2 pontos de design registrados como dívida pré-existente, sem mudança de código — descoberta de slug via `23505` (característica do schema desde `0002`, não desta migration); `returns factory.organizations` acopla contrato à tabela inteira (mudança de padrão system-wide, fora do escopo de uma migration pontual).
 
 `supabase/migrations/0014_organization_bootstrap.sql` é a única mudança em caminho privilegiado (`supabase/migrations/**`) deste sprint — considero a fiscalização desse caminho materialmente completa. RBAC de rotas (`canManageOrganization`) e auth flows não passam pelo mesmo gate de `/fiscal` (não envolvem `SECURITY DEFINER`/RLS), foram revisados diretamente durante a implementação (ver seção "Revisão final de RBAC" acima).
+
+## Fiscal R1 (rodada `fiscal_b92abef9e129f59fae0f35d2`, sha `e2e1cbc`) — achados validados pelo construtor local
+
+Revisão do fiscal OpenAI sem acesso live (só diff inline), 6 pontos. Validados um a um contra o código atual antes de corrigir — só os confirmados foram alterados:
+
+1. **[BLOQUEADOR, confirmado] `removeMember()` sempre falhava.** `0009_rls_policies.sql` só concede `select, insert, update` a `authenticated`; a policy de DELETE de `0015` nunca chegava a ser avaliada por falta do GRANT de tabela. `supabase/tests/memberships_owner_hardening.sql` mascarava isso concedendo `delete` manualmente dentro da própria transação de teste. Corrigido: `grant delete on factory.memberships to authenticated;` em `0015` (migration ainda não mesclada em `main` — não é histórica, pode ser editada); grant redundante removido do teste.
+2. **[ALTO, confirmado] Corrida no trigger de último owner.** `protect_last_owner()` fazia `SELECT` simples para checar "existe outro owner"; duas transações concorrentes removendo/rebaixando owners distintos da mesma organização não se viam (READ COMMITTED) e ambas passavam. Corrigido com `FOR UPDATE` na checagem: a segunda transação bloqueia até a primeira commitar e reavalia o estado real (na pior hipótese as duas colidem em deadlock — Postgres aborta uma delas; nunca as duas commitam e zeram os owners). Teste de concorrência real (duas sessões simultâneas) não é viável no harness pgTAP atual (roda em uma única transação) — fica como limite conhecido, não como pendência silenciada.
+3. **[ALTO, já rastreado] `governance.audit_events` sem função de escrita.** Não é achado novo — já documentado acima ("Dois gaps novos...", item 1) desde a implementação original. Sem mudança de código nesta rodada.
+4. **[ALTO, não é código] CI/Vercel.** `Vercel – fabricarns` (Agent Bridge) é falha fora do escopo desta PR de app control-plane; `validate` skip é esperado — já explicado nas rodadas de revisão anteriores (`CLAUDE_CLOUD_REVIEWER`, rounds 1–3). Nada a corrigir no código.
+5. **[MÉDIO, confirmado] `NEXT_PUBLIC_SITE_URL` sem validação e erro de reset engolido.** Fallback `?? ''` fazia `redirectTo` virar caminho relativo se a env var faltasse, e `resetPasswordForEmail()` tinha o retorno descartado (nenhum log, nem servidor). Corrigido: `siteUrl()` em `lib/supabase/env.ts` (mesmo padrão de `supabaseUrl()`/`supabasePublishableKey()`, lança erro claro se ausente), usado nos dois `redirectTo` de `auth.ts`; erro de `resetPasswordForEmail` agora logado no servidor (`console.error`) sem alterar a resposta uniforme ao cliente (continua sem revelar se o e-mail existe). `NEXT_PUBLIC_SITE_URL` adicionada ao `.env.example`.
+6. **[Lacuna de evidência, não é código] Pedido de mais contexto** (plano/DoD/diff completo dos arquivos omitidos/logs). Não é um bug — é pedido de evidência para uma rodada de revisão sem acesso live ao GitHub.
 
 ## Estado final do sprint
 

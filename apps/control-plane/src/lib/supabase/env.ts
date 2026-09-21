@@ -15,3 +15,12 @@ export function supabasePublishableKey(): string {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   );
 }
+
+/**
+ * Sem esta variável, `redirectTo` do reset de senha e do OAuth vira caminho
+ * relativo (`/auth/callback...`) — o e-mail/redirect do Supabase quebra
+ * silenciosamente (Fiscal R1, achado 5).
+ */
+export function siteUrl(): string {
+  return required('NEXT_PUBLIC_SITE_URL', process.env.NEXT_PUBLIC_SITE_URL);
+}
