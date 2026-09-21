@@ -95,7 +95,10 @@ export function LoginForm({ next, registered }: { next: string; registered: bool
 
       <p className="text-body-sm text-text-muted text-center">
         Não tem conta?{' '}
-        <Link href="/registrar" className="text-brand-primary hover:underline">
+        <Link
+          href={next === '/' ? '/registrar' : `/registrar?next=${encodeURIComponent(next)}`}
+          className="text-brand-primary hover:underline"
+        >
           Criar conta
         </Link>
       </p>

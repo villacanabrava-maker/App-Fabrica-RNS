@@ -33,6 +33,7 @@ export async function signUpWithPassword(_prev: ActionState, formData: FormData)
   const email = String(formData.get('email') ?? '');
   const password = String(formData.get('password') ?? '');
   const fullName = String(formData.get('fullName') ?? '');
+  const next = sanitizeRedirectPath(formData.get('next'));
 
   if (password.length < 8) {
     return { error: 'A senha precisa ter pelo menos 8 caracteres.' };
@@ -49,7 +50,9 @@ export async function signUpWithPassword(_prev: ActionState, formData: FormData)
     return { error: 'Não foi possível criar a conta. Verifique os dados e tente novamente.' };
   }
 
-  redirect('/login?registrado=1');
+  // `next` (ex.: /aceitar-convite/:token) sobrevive ao cadastro até o login —
+  // sem isso, quem cria conta a partir de um convite perde o destino.
+  redirect(`/login?registrado=1&next=${encodeURIComponent(next)}`);
 }
 
 export async function requestPasswordReset(_prev: ActionState, formData: FormData): Promise<ActionState> {
