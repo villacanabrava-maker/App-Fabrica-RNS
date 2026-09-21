@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getCurrentMembership } from '@/server/queries/organizations';
+import { canManageTeam } from '@/server/queries/rbac';
 import type { ActionState } from './auth';
 import type { MembershipRole } from '../queries/organizations';
 
@@ -36,10 +37,6 @@ export async function updateOrganizationGeneral(_prev: ActionState, formData: Fo
   return { success: true };
 }
 
-function requiredRoleForMemberChange(): MembershipRole[] {
-  return ['owner', 'admin'];
-}
-
 /**
  * ★ Achado ao implementar: não existe constraint/trigger no banco
  * impedindo que uma organização fique sem nenhum owner (09-CONFIGURACOES.md
@@ -69,7 +66,7 @@ export async function updateMemberRole(_prev: ActionState, formData: FormData): 
   const current = await getCurrentMembership();
   if (!current) return { error: 'Sessão inválida.' };
 
-  if (!requiredRoleForMemberChange().includes(current.role)) {
+  if (!canManageTeam(current.role)) {
     return { error: 'Apenas owner ou admin podem alterar papéis.' };
   }
 
@@ -92,6 +89,10 @@ export async function removeMember(_prev: ActionState, formData: FormData): Prom
   const membershipId = String(formData.get('membershipId') ?? '');
   const current = await getCurrentMembership();
   if (!current) return { error: 'Sessão inválida.' };
+
+  if (!canManageTeam(current.role)) {
+    return { error: 'Apenas owner ou admin podem remover membros.' };
+  }
 
   if (await isLastOwner(current.organizationId, membershipId)) {
     return { error: 'O último owner não pode ser removido. Transfira a posse para outro membro antes.' };

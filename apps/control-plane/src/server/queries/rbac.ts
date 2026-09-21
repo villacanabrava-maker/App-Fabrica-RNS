@@ -17,12 +17,23 @@ export function hasAtLeastRole(role: MembershipRole, required: MembershipRole): 
   return ROLE_RANK[role] >= ROLE_RANK[required];
 }
 
+/**
+ * 09-CONFIGURACOES.md §1: "Permissão mínima: viewer para ver o próprio
+ * perfil; admin para a maioria" — owner/admin é o piso comum a Geral,
+ * Equipe e Segurança. Único ponto de verdade: as três (e settings.ts,
+ * que altera papel/remove membro) chamam esta função em vez de repetir
+ * `role === 'owner' || role === 'admin'`.
+ */
+export function canManageOrganization(role: MembershipRole): boolean {
+  return hasAtLeastRole(role, 'admin');
+}
+
 export function canManageTeam(role: MembershipRole): boolean {
-  return role === 'owner' || role === 'admin';
+  return canManageOrganization(role);
 }
 
 export function canManageSecurity(role: MembershipRole): boolean {
-  return role === 'owner' || role === 'admin';
+  return canManageOrganization(role);
 }
 
 export function canDeleteOrganization(role: MembershipRole): boolean {

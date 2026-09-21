@@ -76,13 +76,28 @@ Achados ao implementar Configurações; diferente dos dois acima, nenhum abre br
 | Configurações: Segurança | `/configuracoes/seguranca` — status real de 2FA via `supabase.auth.mfa`; sessões/chaves/log de auditoria claramente marcados como não implementados, não fabricados |
 | RBAC aplicado nas rotas | `src/proxy.ts` (sessão), `(app)/layout.tsx` (organização), `server/queries/rbac.ts` + checks por página (owner/admin para editar) |
 
+## Storybook configurado (segundo round)
+
+`apps/control-plane/.storybook/{main.ts,preview.tsx}` + `src/stories/*.stories.tsx` (Button, Input, Card, StatusPill, EmptyState, ErrorState, AsyncBoundary). Decisão: as stories vivem no app (`apps/control-plane/src/stories`), não em `packages/design-system` — o pacote de design system é "puro" (sem devDependency de ferramentas de app, mesmo padrão do Sprint 1.1); quem depende de Storybook é o app. `eslint-plugin-storybook` (já na dependência) foi de fato ligado em `eslint.config.mjs` (`flat/recommended`), não só instalado.
+
+**Validado de verdade, não só por typecheck**: `pnpm build-storybook` rodou até o fim (webpack compilou os 7 bundles de stories + preview com os tokens/Tailwind reais via `globals.css`) — "Storybook build completed successfully". `storybook-static/` adicionado ao `.gitignore` (artefato de build, não deveria ir para o repositório).
+
+## Revisão final de RBAC (achado de consolidação, corrigido)
+
+Ao revisar as rotas `(app)` uma a uma antes de fechar o sprint: `canManageTeam`/`canManageSecurity` em `server/queries/rbac.ts` duplicavam o mesmo teste (`role === 'owner' || role === 'admin'`) em vez de usar `hasAtLeastRole`, que já existia no mesmo arquivo. `configuracoes/geral/page.tsx` repetia o teste inline uma terceira vez, e `server/actions/settings.ts` uma quarta (`requiredRoleForMemberChange()`). Nenhuma das quatro cópias estava errada, mas quatro cópias do mesmo invariante de permissão é exatamente o tipo de duplicação que diverge silenciosamente numa mudança futura. Consolidado em `canManageOrganization(role) = hasAtLeastRole(role, 'admin')`, e as quatro chamadas agora passam por ela.
+
+Achado adicional, corrigido: `removeMember` (`server/actions/settings.ts`) não tinha nenhum check de papel na camada de aplicação (só `updateMemberRole` tinha) — dependia inteiramente da RLS (`"admins manage memberships" for all`, confirmada em `0009_rls_policies.sql`, cobre DELETE). Não era brecha de segurança (RLS já bloqueava, e a UI só mostra o botão "Remover" quando `canManageTeam` é verdadeiro), mas ficava inconsistente com `updateMemberRole` e devolvia um erro genérico em vez de uma mensagem clara. Adicionado o mesmo guard de `canManageTeam` no início da action, por defesa em profundidade e paridade com `updateMemberRole`.
+
 ## Pendente
 
 | Item | Por que não está nesta PR | O que resolve |
 |---|---|---|
-| Storybook configurado | Não iniciado ainda neste round de implementação — próximo passo | Configurar `@storybook/nextjs` + `@storybook/addon-a11y` (já verificados/nas dependências) e escrever stories dos primitivos |
 | `/aceitar-convite/:token` + migration `factory.invites` | Aguardando decisão/congelamento humano (ver nota acima) | Usuário decide; fiscal já validou a abordagem técnica |
 | `governance.audit_events` sem função de escrita seguro | Achado durante Configurações, não é brecha de segurança entre tenants | Função SECURITY DEFINER equivalente à de bootstrap de organização |
 | Proteção de último owner só em nível de aplicação | Idem — funciona, mas não é constraint de banco | Trigger/constraint no banco, mais robusto |
 | `supabase test db` não executado localmente | Docker sem daemon neste sandbox (mesmo limite do Sprint 1.1) | Database CI real confirma `0014_organization_bootstrap.sql` + `organization_bootstrap.sql` |
-| Testes de componente (Storybook), E2E Playwright | Fora do que deu para cobrir neste round | Próximo round + Sprint 1.13 (aceitação da Fase 1) |
+| Testes de componente (interaction tests), E2E Playwright | Fora do que deu para cobrir neste round | Próximo round + Sprint 1.13 (aceitação da Fase 1) |
+
+## Estado final do sprint
+
+Todos os itens do checklist original estão entregues, exceto `/aceitar-convite` (bloqueado por decisão humana pendente, não por trabalho faltando) — ver nota acima. A "SAÍDA" pedida (entrar, criar organização, convidar membro, alterar papel) está coberta parcialmente: entrar/criar organização/alterar papel funcionam ponta a ponta; "convidar membro" só cobre convidar alguém que já tem conta (o botão de convite por e-mail fica desabilitado, propositalmente, até a decisão de schema).

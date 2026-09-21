@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentMembership, getOrganizationDetail } from '@/server/queries/organizations';
+import { canManageOrganization } from '@/server/queries/rbac';
 import { GeralForm } from './geral-form';
 
 export default async function ConfiguracoesGeralPage() {
@@ -7,7 +8,7 @@ export default async function ConfiguracoesGeralPage() {
   if (!membership) redirect('/organizacao/nova');
 
   const org = await getOrganizationDetail(membership.organizationId);
-  const canEdit = membership.role === 'owner' || membership.role === 'admin';
+  const canEdit = canManageOrganization(membership.role);
 
   return (
     <GeralForm
