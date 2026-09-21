@@ -2,16 +2,18 @@
 
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { siteUrl } from '@/lib/supabase/env';
 import { getCurrentMembership } from '@/server/queries/organizations';
-import { canManageTeam, canModifyMembership, isMembershipRole } from '@/server/queries/rbac';
+import { canInviteRole, canManageTeam, canModifyMembership, isMembershipRole } from '@/server/queries/rbac';
 import type { ActionState } from './auth';
 import type { MembershipRole } from '../queries/organizations';
 
 /**
  * organization_id nunca vem do formulário — sempre derivado da sessão via
  * getCurrentMembership() (03-RLS-E-DADOS.md: "organization_id nunca vem
- * do cliente"). A policy "admins update own organization" ainda barra
- * quem não é owner/admin — este check é UX antecipada, não a defesa real.
+ * do cliente"). A autorização real é recalculada dentro de
+ * factory.update_organization_general (0016_invites.sql) — este check é UX
+ * antecipada, não a defesa real.
  */
 export async function updateOrganizationGeneral(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const membership = await getCurrentMembership();
@@ -24,10 +26,12 @@ export async function updateOrganizationGeneral(_prev: ActionState, formData: Fo
   if (!name) return { error: 'Nome da organização é obrigatório.' };
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase
-    .from('organizations')
-    .update({ name, description: description || null, timezone: timezone || undefined })
-    .eq('id', membership.organizationId);
+  const { error } = await supabase.rpc('update_organization_general', {
+    p_organization_id: membership.organizationId,
+    p_name: name,
+    p_description: description || null,
+    p_timezone: timezone || null,
+  });
 
   if (error) {
     return { error: 'Não foi possível salvar. Verifique se você tem permissão de admin/owner.' };
@@ -38,15 +42,9 @@ export async function updateOrganizationGeneral(_prev: ActionState, formData: Fo
 }
 
 /**
- * ★ Achado ao implementar: não existe constraint/trigger no banco
- * impedindo que uma organização fique sem nenhum owner (09-CONFIGURACOES.md
- * exige "não remove/rebaixa o último owner", mas nenhuma migration
- * modela isso). Diferente do gap de bootstrap de organização, este não
- * abre brecha entre tenants nem escalação de privilégio — é integridade
- * operacional (organização órfã de owner, recuperável por um admin do
- * banco). Guard aplicado aqui, na camada de aplicação, como mitigação
- * real enquanto uma constraint/trigger no banco (mais robusta) não entra
- * — registrado em sprint-1-2-status.md como dívida explícita.
+ * Guard de UX (mensagem específica antes de submeter). A defesa real contra
+ * remover/rebaixar o último owner é o trigger `memberships_protect_last_owner`
+ * (0015), que dispara mesmo dentro das funções SECURITY DEFINER abaixo.
  */
 async function isLastOwner(organizationId: string, membershipId: string): Promise<boolean> {
   const supabase = await createSupabaseServerClient();
@@ -85,7 +83,7 @@ export async function updateMemberRole(_prev: ActionState, formData: FormData): 
   if (!isMembershipRole(rawRole)) return { error: 'Papel inválido.' };
   const role: MembershipRole = rawRole;
 
-  // Autorização recalculada no servidor: não confia em `canManage` da UI nem no papel vindo do formulário.
+  // Autorização recalculada no servidor: não confia em `canModify` da UI nem no papel vindo do formulário.
   const targetRole = await getTargetRole(current.organizationId, membershipId);
   if (!targetRole) return { error: 'Membro não encontrado nesta organização.' };
   if (!canModifyMembership(current.role, targetRole, role)) {
@@ -96,8 +94,9 @@ export async function updateMemberRole(_prev: ActionState, formData: FormData): 
     return { error: 'O último owner não pode ser rebaixado. Transfira a posse para outro membro antes.' };
   }
 
+  // factory.update_member_role (0016_invites.sql): mutação + audit_event na mesma transação.
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from('memberships').update({ role }).eq('id', membershipId);
+  const { error } = await supabase.rpc('update_member_role', { p_membership_id: membershipId, p_role: role });
 
   if (error) {
     return { error: 'Não foi possível alterar o papel.' };
@@ -126,8 +125,9 @@ export async function removeMember(_prev: ActionState, formData: FormData): Prom
     return { error: 'O último owner não pode ser removido. Transfira a posse para outro membro antes.' };
   }
 
+  // factory.remove_member (0016_invites.sql): mutação + audit_event na mesma transação.
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from('memberships').delete().eq('id', membershipId);
+  const { error } = await supabase.rpc('remove_member', { p_membership_id: membershipId });
 
   if (error) {
     return { error: 'Não foi possível remover este membro.' };
@@ -137,12 +137,66 @@ export async function removeMember(_prev: ActionState, formData: FormData): Prom
   return { success: true };
 }
 
-// ★ Achado ao implementar: governance.audit_events não tem policy de
-// INSERT (só "org members read audit", SELECT) — mesma classe de gap já
-// encontrada em organizations/memberships (ver 0014_organization_bootstrap.sql).
-// "Toda alteração gera audit_event" (09-CONFIGURACOES.md §12) fica
-// pendente de uma função SECURITY DEFINER equivalente
-// (governance.log_audit_event ou similar), não implementada neste sprint
-// para não escrever uma segunda migration de segurança sem a mesma
-// consulta ao fiscal já feita para o bootstrap de organização — ver
-// sprint-1-2-status.md.
+export interface InviteActionState extends ActionState {
+  link?: string;
+}
+
+/**
+ * Chama factory.create_invite (0016_invites.sql) — o token em claro só
+ * existe neste retorno (a função só persiste o hash). O link é mostrado uma
+ * vez ao admin/owner para copiar e enviar; não há provedor de e-mail
+ * configurado neste repositório (CLAUDE.md: não presumir integração até a
+ * configuração existir).
+ */
+export async function inviteMember(_prev: InviteActionState, formData: FormData): Promise<InviteActionState> {
+  const current = await getCurrentMembership();
+  if (!current) return { error: 'Sessão inválida.' };
+  if (!canManageTeam(current.role)) return { error: 'Apenas owner ou admin podem convidar membros.' };
+
+  const email = String(formData.get('email') ?? '').trim();
+  const rawRole = formData.get('role');
+  if (!email) return { error: 'Informe o e-mail do convidado.' };
+  if (!isMembershipRole(rawRole)) return { error: 'Papel inválido.' };
+  const role: MembershipRole = rawRole;
+
+  if (!canInviteRole(current.role, role)) {
+    return { error: 'Apenas owner pode convidar com o papel owner.' };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc('create_invite', {
+    p_organization_id: current.organizationId,
+    p_email: email,
+    p_role: role,
+  });
+
+  if (error) {
+    if (error.message.includes('já é membro')) return { error: 'Este e-mail já é membro da organização.' };
+    if (error.message.includes('convite pendente')) return { error: 'Já existe um convite pendente para este e-mail.' };
+    if (error.message.includes('e-mail inválido')) return { error: 'E-mail inválido.' };
+    return { error: 'Não foi possível criar o convite.' };
+  }
+
+  const invite = (Array.isArray(data) ? data[0] : data) as { token?: string } | null;
+  const link = invite?.token ? `${siteUrl()}/aceitar-convite/${invite.token}` : undefined;
+
+  revalidatePath('/configuracoes/equipe');
+  return { success: true, link };
+}
+
+export async function revokeInvite(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const current = await getCurrentMembership();
+  if (!current) return { error: 'Sessão inválida.' };
+  if (!canManageTeam(current.role)) return { error: 'Apenas owner ou admin podem revogar convites.' };
+
+  const inviteId = String(formData.get('inviteId') ?? '');
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.rpc('revoke_invite', { p_invite_id: inviteId });
+
+  if (error) {
+    return { error: 'Não foi possível revogar o convite.' };
+  }
+
+  revalidatePath('/configuracoes/equipe');
+  return { success: true };
+}

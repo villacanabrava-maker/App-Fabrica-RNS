@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canInviteRole,
   canManageTeam,
   canModifyMembership,
   isMembershipRole,
@@ -44,6 +45,25 @@ describe('canModifyMembership (escalada admin -> owner)', () => {
           expect(canModifyMembership(actor, target, next)).toBe(false);
         }
       }
+    }
+  });
+});
+
+describe('canInviteRole (mesma regra de canModifyMembership, para convite)', () => {
+  it('owner convida com qualquer papel, inclusive owner', () => {
+    for (const role of ROLES) expect(canInviteRole('owner', role)).toBe(true);
+  });
+
+  it('admin convida qualquer papel, exceto owner', () => {
+    expect(canInviteRole('admin', 'owner')).toBe(false);
+    expect(canInviteRole('admin', 'admin')).toBe(true);
+    expect(canInviteRole('admin', 'engineer')).toBe(true);
+    expect(canInviteRole('admin', 'viewer')).toBe(true);
+  });
+
+  it('engineer e viewer nunca convidam', () => {
+    for (const actor of ['engineer', 'viewer'] as Role[]) {
+      for (const role of ROLES) expect(canInviteRole(actor, role)).toBe(false);
     }
   });
 });

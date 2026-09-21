@@ -64,3 +64,14 @@ export function canModifyMembership(
   if (actorRole === 'owner') return true;
   return targetCurrentRole !== 'owner' && newRole !== 'owner';
 }
+
+/**
+ * Mesma regra de `canModifyMembership` aplicada a convite (não há
+ * "targetCurrentRole" — é uma membership que ainda não existe): só owner
+ * convida com papel owner; admin convida qualquer outro papel. Espelhada em
+ * `factory.create_invite` (0016_invites.sql), que é a defesa real.
+ */
+export function canInviteRole(actorRole: MembershipRole, role: MembershipRole): boolean {
+  if (!canManageTeam(actorRole)) return false;
+  return actorRole === 'owner' || role !== 'owner';
+}
