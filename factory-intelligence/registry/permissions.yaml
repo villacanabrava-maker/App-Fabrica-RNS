@@ -42,8 +42,31 @@ profiles:
     network: package_registries
     production: deny
     shell:
-      allow: [git, npm, pnpm, node, npx, tsc, vitest, playwright, ls, cat, grep, find, mkdir, touch]
-      deny:  [sudo, 'chmod 777', 'curl * | sh', 'wget * | sh', ssh, 'rm -rf /']
+      # ★ Achado do fiscal: liberar `node`, `npm`, `pnpm` por inteiro (primeiro
+      # token) também libera seus executores embutidos de código/pacote
+      # arbitrário — `node -e`/`--eval` roda qualquer string como JS, `npm
+      # exec`/`npx` e `pnpm exec`/`dlx` baixam e rodam qualquer pacote. Nenhum
+      # desses precisa de metacaracteres de shell para ter o mesmo efeito de
+      # `rm -rf /`. `npx` nunca esteve no esboço de
+      # docs/05-SEGURANCA/02-PERMISSOES-E-POLITICAS.md — removido daqui por
+      # completo, não só negado. `node`, `npm`, `pnpm` continuam liberados
+      # (são as ferramentas reais do workspace), mas seus subcomandos/flags
+      # de execução arbitrária vão para deny, que sempre vence sobre allow.
+      allow: [git, npm, pnpm, node, tsc, vitest, playwright, ls, cat, grep, find, mkdir, touch]
+      deny:
+        - sudo
+        - 'chmod 777'
+        - 'curl * | sh'
+        - 'wget * | sh'
+        - ssh
+        - 'rm -rf /'
+        - 'node -e**'
+        - 'node --eval**'
+        - 'npm exec**'
+        - 'npm x**'
+        - 'npx**'
+        - 'pnpm exec**'
+        - 'pnpm dlx**'
 
   test_workspace:
     extends: workspace_write
