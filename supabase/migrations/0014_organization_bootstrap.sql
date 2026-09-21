@@ -28,15 +28,29 @@
 -- o primeiro (organization) desfaz junto — todo o corpo da função roda na
 -- transação do chamador.
 --
--- Escopo desta função é só o bootstrap da PRIMEIRA organização/membership
--- de um usuário recém-autenticado. Não é um caminho genérico para criar
--- memberships arbitrárias (isso continua exclusivo de
--- "admins manage memberships") nem aceita role: quem chama sempre vira
--- 'owner' da organização que acabou de criar.
+-- ★ Achado do fiscal (request_id fiscal_7aefb81016cdbd4594cd9ee2): a versão
+-- anterior deste comentário dizia "escopo é só o bootstrap da PRIMEIRA
+-- organização", mas o código nunca impôs isso — qualquer usuário
+-- autenticado pode chamar esta função quantas vezes quiser, virando owner
+-- de uma organização nova a cada chamada. Contrato declarado divergia do
+-- comportamento real. Corrigido aqui para descrever o que a função de
+-- fato faz, não o que a documentação presumia.
+--
+-- Esta função cria uma organização nova e torna o chamador seu owner, sem
+-- limite de quantas vezes um mesmo usuário pode chamá-la nem verificação
+-- de membership prévia — não é exclusiva de "primeiro acesso". Não é um
+-- caminho genérico para criar memberships arbitrárias em organizações já
+-- existentes (isso continua exclusivo de "admins manage memberships") nem
+-- aceita role: quem chama sempre vira 'owner' da organização que acabou
+-- de criar, nunca de uma organização pré-existente.
 --
 -- Limite de organizações por usuário: não há regra documentada em nenhum
 -- lugar canônico (docs/01-PRODUTO/04-DECISOES-CONGELADAS.md não cobre
--- isso). Não inventado aqui — UNSPECIFIED, decisão de produto pendente.
+-- isso) — não é UNSPECIFIED por omissão do código, é uma decisão de
+-- produto real ainda não tomada. Se um limite vier a existir, precisa ser
+-- imposto aqui (ou em constraint/trigger), não só na UI — a função é
+-- chamável diretamente via RPC, então uma checagem só na Server Action
+-- não seria uma defesa real.
 -- ============================================================
 
 create or replace function factory.create_organization(p_name text, p_slug text)

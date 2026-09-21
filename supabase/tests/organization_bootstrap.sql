@@ -5,7 +5,7 @@
 -- fiscal_e2e3a330b5652c9b5bb3e602) na PR #5, antes de qualquer merge.
 -- ============================================================
 begin;
-select plan(11);
+select plan(13);
 
 insert into auth.users (id) values
   ('11111111-0000-0000-0000-000000000001'),
@@ -103,6 +103,32 @@ select is(
   0,
   'usuário B não enxerga a organização A — isolamento por RLS (members read own organization) continua valendo'
 );
+
+-- ---------- 3b. mesmo usuário pode criar uma segunda organização (achado do fiscal) ----------
+-- fiscal_7aefb81016cdbd4594cd9ee2: o cabeçalho da migration dizia "só a
+-- primeira organização", mas nada no código impunha isso. Em vez de
+-- adicionar uma restrição não pedida por nenhuma decisão de produto
+-- canônica, corrigimos o comentário para descrever o comportamento real
+-- — e este teste trava esse comportamento real, para não regredir em
+-- silêncio se algum dia uma migration futura tentar impor um limite sem
+-- atualizar este teste.
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"11111111-0000-0000-0000-000000000001"}', true);
+
+select lives_ok(
+  $$ select factory.create_organization('Organização A2', 'org-bootstrap-a2') $$,
+  'usuário que já é owner de uma organização pode criar uma segunda — sem limite imposto pela função'
+);
+
+select is(
+  (select role from factory.memberships m join factory.organizations o on o.id = m.organization_id
+    where o.slug = 'org-bootstrap-a2'),
+  'owner'::membership_role,
+  'usuário vira owner também da segunda organização, independente da primeira'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"22222222-0000-0000-0000-000000000002"}', true);
 
 -- ---------- 4. autoelevação em organização já existente continua bloqueada ----------
 -- ★ Achado ao rodar `supabase test db` no Database CI: a versão
