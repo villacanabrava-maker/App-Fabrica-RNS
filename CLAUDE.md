@@ -23,3 +23,17 @@ As regras acima governam como você trabalha *neste repositório*. A partir da f
 4. Nenhum nome de modelo de IA vai em código; modelos vivem em `factory-intelligence/registry/models.yaml`.
 5. A ordem de construção é fixa: Fase 1 (app funcional com agentes mockados) → Fase 2 (agentes reais) → Fase 3 (refinamento visual). Não adiante Fase 3 antes de Fase 1 estar com Definition of Done cumprido (`docs/08-PLANO-DE-IMPLEMENTACAO/05-DEFINITION-OF-DONE.md`).
 6. Ponto de entrada completo: `docs/00-COMECE-AQUI/00-LEIA-PRIMEIRO.md`.
+
+
+## Comunicação com o agente fiscalizador
+
+Quando precisar de revisão técnica, validação de aderência ao plano ou uma ação do fiscal:
+
+1. Use a issue ou pull request relacionada à tarefa.
+2. Publique um comentário começando por `/fiscal ` seguido do pedido.
+3. Aguarde a resposta automática no mesmo thread.
+4. Nunca solicite, leia, copie ou armazene `OPENAI_API_KEY`, `SUPABASE_SECRET_KEY`, `VERCEL_TOKEN`, `FISCAL_BRIDGE_SECRET` ou qualquer outro segredo.
+5. O fiscal pode revisar, comentar e orientar/operar infraestrutura autorizada, mas nunca aprova nem faz merge de PRs.
+6. Se o bridge estiver indisponível, registre o bloqueio no thread e não invente credenciais nem contorne o mecanismo.
+
+Documentação operacional: `docs/09-OPERACOES/AGENT-BRIDGE.md`.
