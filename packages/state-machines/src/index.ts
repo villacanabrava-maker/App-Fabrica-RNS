@@ -85,13 +85,19 @@ export function canTransition(
   actor: ActorKind,
   ctx: TaskContext,
 ): TransitionResult {
-  // Cancelamento e supersessão são universais
-  if (to === 'cancelled' && actor === 'human') return { ok: true };
-  if (to === 'superseded' && actor === 'system') return { ok: true };
-
-  if (TERMINAL.includes(from) && to !== 'superseded') {
+  // ★ A checagem de terminalidade vem ANTES dos atalhos universais.
+  // Um estado terminal só aceita 'superseded' — nem cancelamento por
+  // humano reabre completed/failed_terminal/cancelled. Checar terminal
+  // depois do atalho de cancelamento permitia completed -> cancelled e
+  // failed_terminal -> cancelled, o que a Constituição não prevê.
+  if (TERMINAL.includes(from)) {
+    if (to === 'superseded' && actor === 'system') return { ok: true };
     return { ok: false, reason: `Estado ${from} é terminal.` };
   }
+
+  // Cancelamento e supersessão são universais para estados não terminais
+  if (to === 'cancelled' && actor === 'human') return { ok: true };
+  if (to === 'superseded' && actor === 'system') return { ok: true };
 
   const match = TASK_TRANSITIONS.find(
     (t) => t.from === from && t.to === to && t.trigger === trigger,

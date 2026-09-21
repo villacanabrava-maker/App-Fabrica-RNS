@@ -24,11 +24,16 @@ jobs:
       - uses: actions/checkout@v4
       - id: check
         run: |
-          if [ -f package.json ]; then
+          # package.json sozinho não basta: este job precisa também dos
+          # scripts de scripts/intelligence/, que são entregáveis da Fase 0
+          # (docs/08-PLANO-DE-IMPLEMENTACAO/01-PLANO-MESTRE-DE-IMPLEMENTACAO.md
+          # §3) ainda não construídos, mesmo já com package.json na raiz
+          # (Fase 1, Sprint 1.1).
+          if [ -f package.json ] && [ -f scripts/intelligence/validate-schemas.ts ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::package.json ausente — a Fase 1 (app funcional) ainda não foi implementada, ver docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md. Este workflow passa a validar de verdade assim que a Fase 1 adicionar os scripts em scripts/intelligence/."
+            echo "::notice::scripts/intelligence/ ainda não existe — é entregável da Fase 0, ver docs/08-PLANO-DE-IMPLEMENTACAO/01-PLANO-MESTRE-DE-IMPLEMENTACAO.md §3. Este workflow passa a validar de verdade assim que esses scripts forem escritos."
           fi
 
   validate:
