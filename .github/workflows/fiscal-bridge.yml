@@ -1,0 +1,85 @@
+name: Fiscal Bridge
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  handoff:
+    if: startsWith(github.event.comment.body, '/fiscal')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Preparar pedido
+        id: request
+        env:
+          BODY: ${{ github.event.comment.body }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          python - <<'PY' > request.json
+          import json, os
+          body = os.environ["BODY"]
+          request = body[len("/fiscal"):].strip()
+          context = "\n".join([
+              f"Repository: ${{ github.repository }}",
+              f"Thread: {os.environ['ISSUE_URL']}",
+              f"Title: {os.environ['ISSUE_TITLE']}",
+              f"Comment: {os.environ['COMMENT_URL']}",
+              f"Requester: {os.environ['ACTOR']}",
+          ])
+          print(json.dumps({"request": request, "context": context}, ensure_ascii=False))
+          PY
+
+      - name: Chamar agente fiscalizador
+        id: bridge
+        env:
+          BRIDGE_URL: ${{ secrets.FISCAL_BRIDGE_URL }}
+          BRIDGE_SECRET: ${{ secrets.FISCAL_BRIDGE_SECRET }}
+        run: |
+          if [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_SECRET" ]; then
+            echo "Bridge não configurado: faltam FISCAL_BRIDGE_URL/FISCAL_BRIDGE_SECRET."
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            -X POST "$BRIDGE_URL/api/fiscal-handoff" \
+            -H "Authorization: Bearer $BRIDGE_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @request.json \
+            > response.json
+
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          data = json.load(open("response.json"))
+          answer = data.get("answer", "")
+          print("answer<<EOF")
+          print(answer)
+          print("EOF")
+          PY
+
+      - name: Publicar resposta no mesmo thread
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANSWER: ${{ steps.bridge.outputs.answer }}
+        run: |
+          {
+            echo "### Fiscal OpenAI"
+            echo
+            printf '%s\n' "$ANSWER"
+            echo
+            echo "---"
+            echo "_Resposta automática do Agent Bridge. Aprovação/merge continuam exclusivamente humanos._"
+          } > comment.md
+
+          gh api \
+            --method POST \
+            "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments" \
+            -f body=@comment.md
