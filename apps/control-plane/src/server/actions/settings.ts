@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getCurrentMembership } from '@/server/queries/organizations';
-import { canManageTeam } from '@/server/queries/rbac';
+import { canManageTeam, canModifyMembership, isMembershipRole } from '@/server/queries/rbac';
 import type { ActionState } from './auth';
 import type { MembershipRole } from '../queries/organizations';
 
@@ -60,14 +60,36 @@ async function isLastOwner(organizationId: string, membershipId: string): Promis
   return owners.length === 1 && owners[0]?.id === membershipId;
 }
 
+/** Papel atual do alvo, lido no servidor e restrito à organização ativa (membershipId vem do cliente). */
+async function getTargetRole(organizationId: string, membershipId: string): Promise<MembershipRole | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase
+    .from('memberships')
+    .select('role')
+    .eq('id', membershipId)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+  return data && isMembershipRole(data.role) ? data.role : null;
+}
+
 export async function updateMemberRole(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const membershipId = String(formData.get('membershipId') ?? '');
-  const role = String(formData.get('role') ?? '') as MembershipRole;
+  const rawRole = formData.get('role');
   const current = await getCurrentMembership();
   if (!current) return { error: 'Sessão inválida.' };
 
   if (!canManageTeam(current.role)) {
     return { error: 'Apenas owner ou admin podem alterar papéis.' };
+  }
+
+  if (!isMembershipRole(rawRole)) return { error: 'Papel inválido.' };
+  const role: MembershipRole = rawRole;
+
+  // Autorização recalculada no servidor: não confia em `canManage` da UI nem no papel vindo do formulário.
+  const targetRole = await getTargetRole(current.organizationId, membershipId);
+  if (!targetRole) return { error: 'Membro não encontrado nesta organização.' };
+  if (!canModifyMembership(current.role, targetRole, role)) {
+    return { error: 'Apenas owner pode atribuir o papel owner ou alterar/rebaixar outro owner.' };
   }
 
   if (role !== 'owner' && (await isLastOwner(current.organizationId, membershipId))) {
@@ -92,6 +114,12 @@ export async function removeMember(_prev: ActionState, formData: FormData): Prom
 
   if (!canManageTeam(current.role)) {
     return { error: 'Apenas owner ou admin podem remover membros.' };
+  }
+
+  const targetRole = await getTargetRole(current.organizationId, membershipId);
+  if (!targetRole) return { error: 'Membro não encontrado nesta organização.' };
+  if (!canModifyMembership(current.role, targetRole, null)) {
+    return { error: 'Apenas owner pode remover outro owner.' };
   }
 
   if (await isLastOwner(current.organizationId, membershipId)) {

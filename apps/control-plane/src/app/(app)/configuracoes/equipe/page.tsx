@@ -14,6 +14,7 @@ export default async function ConfiguracoesEquipePage() {
       members={members}
       currentUserId={membership.userId}
       canManage={canManageTeam(membership.role)}
+      actorRole={membership.role}
     />
   );
 }

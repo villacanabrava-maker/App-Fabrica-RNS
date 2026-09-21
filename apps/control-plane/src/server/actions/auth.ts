@@ -1,6 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import { sanitizeRedirectPath } from '@/lib/redirect';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export interface ActionState {
@@ -15,7 +16,7 @@ export interface ActionState {
 export async function signInWithPassword(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const email = String(formData.get('email') ?? '');
   const password = String(formData.get('password') ?? '');
-  const next = String(formData.get('next') ?? '/');
+  const next = sanitizeRedirectPath(formData.get('next'));
 
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -24,7 +25,7 @@ export async function signInWithPassword(_prev: ActionState, formData: FormData)
     return { error: 'E-mail ou senha incorretos.' };
   }
 
-  redirect(next.startsWith('/') ? next : '/');
+  redirect(next);
 }
 
 export async function signUpWithPassword(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -63,7 +64,7 @@ export async function requestPasswordReset(_prev: ActionState, formData: FormDat
 }
 
 export async function signInWithGitHub(formData: FormData): Promise<never> {
-  const next = String(formData.get('next') ?? '/');
+  const next = sanitizeRedirectPath(formData.get('next'));
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',

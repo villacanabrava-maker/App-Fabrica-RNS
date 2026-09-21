@@ -39,3 +39,28 @@ export function canManageSecurity(role: MembershipRole): boolean {
 export function canDeleteOrganization(role: MembershipRole): boolean {
   return role === 'owner';
 }
+
+const MEMBERSHIP_ROLES: readonly MembershipRole[] = ['owner', 'admin', 'engineer', 'viewer'];
+
+export function isMembershipRole(value: unknown): value is MembershipRole {
+  return typeof value === 'string' && (MEMBERSHIP_ROLES as readonly string[]).includes(value);
+}
+
+/**
+ * Único ponto de verdade para "quem pode mexer em qual membership".
+ * `newRole = null` significa remoção. Regra (defesa em profundidade — a
+ * mesma regra é imposta no banco por 0015_memberships_owner_hardening.sql):
+ * - só owner/admin gerenciam equipe;
+ * - admin NUNCA atribui `owner` (a outrem nem a si) e NUNCA rebaixa/remove um owner;
+ * - só owner atribui `owner` ou altera/remove outro owner.
+ * O último owner continua protegido à parte (guard de aplicação + trigger no banco).
+ */
+export function canModifyMembership(
+  actorRole: MembershipRole,
+  targetCurrentRole: MembershipRole,
+  newRole: MembershipRole | null,
+): boolean {
+  if (!canManageTeam(actorRole)) return false;
+  if (actorRole === 'owner') return true;
+  return targetCurrentRole !== 'owner' && newRole !== 'owner';
+}

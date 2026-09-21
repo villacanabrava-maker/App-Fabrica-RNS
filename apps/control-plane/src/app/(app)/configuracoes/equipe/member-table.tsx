@@ -5,18 +5,22 @@ import { Button } from '@rns/design-system';
 import { removeMember, updateMemberRole } from '@/server/actions/settings';
 import type { ActionState } from '@/server/actions/auth';
 import type { MembershipRole, OrganizationMember } from '@/server/queries/organizations';
+import { canModifyMembership } from '@/server/queries/rbac';
 
 const ROLES: MembershipRole[] = ['owner', 'admin', 'engineer', 'viewer'];
 const initialState: ActionState = {};
 
+// UX apenas: a autorização real é recalculada no servidor (settings.ts) e no banco (RLS + 0015).
 export function MemberTable({
   members,
   currentUserId,
   canManage,
+  actorRole,
 }: {
   members: OrganizationMember[];
   currentUserId: string;
   canManage: boolean;
+  actorRole: MembershipRole;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -51,7 +55,13 @@ export function MemberTable({
           </thead>
           <tbody>
             {members.map((member) => (
-              <MemberRow key={member.id} member={member} canManage={canManage} isSelf={member.userId === currentUserId} />
+              <MemberRow
+                key={member.id}
+                member={member}
+                canManage={canManage}
+                actorRole={actorRole}
+                isSelf={member.userId === currentUserId}
+              />
             ))}
           </tbody>
         </table>
@@ -60,16 +70,29 @@ export function MemberTable({
   );
 }
 
-function MemberRow({ member, canManage, isSelf }: { member: OrganizationMember; canManage: boolean; isSelf: boolean }) {
+function MemberRow({
+  member,
+  canManage,
+  actorRole,
+  isSelf,
+}: {
+  member: OrganizationMember;
+  canManage: boolean;
+  actorRole: MembershipRole;
+  isSelf: boolean;
+}) {
   const [roleState, roleAction, rolePending] = useActionState(updateMemberRole, initialState);
   const [removeState, removeAction, removePending] = useActionState(removeMember, initialState);
+  const assignableRoles = ROLES.filter((role) => role === member.role || canModifyMembership(actorRole, member.role, role));
+  const canEditRole = canManage && canModifyMembership(actorRole, member.role, member.role);
+  const canRemove = canManage && !isSelf && canModifyMembership(actorRole, member.role, null);
 
   return (
     <tr className="border-t border-border-default">
       <td className="px-4 py-2 text-text-primary">{member.fullName ?? '—'}</td>
       <td className="px-4 py-2 text-text-muted">{member.email}</td>
       <td className="px-4 py-2">
-        {canManage ? (
+        {canEditRole ? (
           <form action={roleAction} className="flex items-center gap-2">
             <input type="hidden" name="membershipId" value={member.id} />
             <select
@@ -80,7 +103,7 @@ function MemberRow({ member, canManage, isSelf }: { member: OrganizationMember; 
               className="rounded-md border border-border-default bg-bg-surface px-2 py-1 text-body-sm text-text-primary"
               onChange={(event) => event.currentTarget.form?.requestSubmit()}
             >
-              {ROLES.map((role) => (
+              {assignableRoles.map((role) => (
                 <option key={role} value={role}>
                   {role}
                 </option>
@@ -93,7 +116,7 @@ function MemberRow({ member, canManage, isSelf }: { member: OrganizationMember; 
         {roleState.error ? <p className="text-caption text-status-danger">{roleState.error}</p> : null}
       </td>
       <td className="px-4 py-2 text-right">
-        {canManage && !isSelf ? (
+        {canRemove ? (
           <form action={removeAction}>
             <input type="hidden" name="membershipId" value={member.id} />
             <Button type="submit" variant="ghost" size="sm" loading={removePending}>
