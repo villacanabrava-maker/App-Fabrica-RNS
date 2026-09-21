@@ -43,7 +43,10 @@ export async function signUpWithPassword(_prev: ActionState, formData: FormData)
   const { error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName } },
+    options: {
+      data: { full_name: fullName },
+      emailRedirectTo: `${siteUrl()}/auth/callback?next=${encodeURIComponent(next)}`,
+    },
   });
 
   if (error) {
