@@ -17,7 +17,7 @@ Checklist original: `docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md`,
 | `approvals_must_be_human` | `supabase/migrations/0006`, teste em `supabase/tests/invariants.sql` |
 | Constraints de idempotência e limite de rodada | `supabase/migrations/0003`, `0005`; testados |
 | Índices essenciais | presentes nas migrations 0002–0008 |
-| Filas pgmq | `supabase/migrations/0012_queues.sql` (esta correção), teste em `supabase/tests/queues.sql` — só a infraestrutura (extensão + fila); consumo real é Sprint 1.4 |
+| Filas pgmq | `supabase/migrations/0013_queues.sql` (esta correção; renumerada de 0012 para 0013 após colisão com `0012_agent_bridge_ledger.sql`, trazida pelo merge da PR #4 — ver nota abaixo), teste em `supabase/tests/queues.sql` — só a infraestrutura (extensão + fila); consumo real é Sprint 1.4 |
 | `supabase test db` rodando em CI de verdade | `.github/workflows/database-ci.yml`, corrigido na PR #1 para não ficar `skipped` |
 | Máquinas de estado puras, testadas | `packages/state-machines`, 21 testes |
 | Policy engine puro, testado | `packages/policy-engine`, 42 testes |
@@ -26,35 +26,45 @@ Checklist original: `docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md`,
 
 | Item | Por que não está nesta PR | O que resolve |
 |---|---|---|
-| Projeto Factory Supabase real (hospedado) — inicialização/alinhamento com as migrations desta PR | Ver nota abaixo: há uma divergência não resolvida entre a fiscalização e a verificação direta deste agente sobre se o projeto já existe | Ver nota abaixo |
+| Projeto Factory Supabase real (hospedado) — alinhamento do schema com as migrations desta PR | Projeto existe e está `ACTIVE_HEALTHY` (confirmado, ver nota abaixo), mas só tem `agent_bridge_ledger` aplicada — aplicar `0001`–`0013` é ação de infraestrutura/rollout deliberado, fora do meu mandato de escrever e testar migrations | Ação humana/fiscal: aplicar as migrations desta PR no projeto `lwjhekfwlnqncxwureda` na ordem e momento corretos |
 | Ruleset de branch protection em `main` | Configuração de repositório GitHub, fora do diff de código; decisão de quais checks são obrigatórios é do dono do repositório | Ação humana no GitHub (Settings → Rules) |
 | `scripts/intelligence/{validate-schemas,validate-registry,build-projections,check-drift,validate-fixtures,run-evals}.ts` | Entregáveis da **Fase 0** (`docs/08-PLANO-DE-IMPLEMENTACAO/01-PLANO-MESTRE-DE-IMPLEMENTACAO.md` §3), fase distinta da Fase 1 e nunca no checklist do Sprint 1.1 — não é um corte de escopo desta correção, é uma lacuna pré-existente e maior, sinalizada aqui para não ficar escondida atrás do guard de CI que a torna `skipped` | Vira uma entrega própria, do tamanho de um sprint, não um item avulso desta correção |
 | `scripts/db/{test-rollback,assert-rls-enabled,assert-invariants}.ts` | Documentados em `docs/07-QUALIDADE/02-CI-CD.md` e no checklist de segurança, mas nunca no checklist do Sprint 1.1 nem escritos em nenhuma fase — precisam de lógica real de inspeção de banco (reverter migrations de verdade, ler `pg_catalog`/`pg_policies` para RLS, checar constraints específicas), não são um mock. Descoberto ao corrigir o guard de CI de `database-ci.yml` (ver nota abaixo): o guard checava só `package.json`, que já existe desde o Sprint 1.1, então tentava rodar esses scripts inexistentes e quebrava com `ERR_MODULE_NOT_FOUND` — mesma classe de bug já corrigida em `intelligence-ci.yml` | Escrever os três scripts como entrega própria; até lá, o guard corrigido volta a marcar esses passos como pulados-de-verdade (`::notice::`), não escondidos atrás de um green falso |
 
-## Nota — divergência sobre o projeto Supabase hospedado (aberta, não resolvida)
+## Nota — projeto Supabase hospedado: identidade confirmada, alinhamento de schema pendente
 
-Revalidação do fiscal (comentário na PR #2, após `b083cc3`) apontou esta
-tabela como desatualizada: segundo o fiscal, o projeto hospedado "App
-Fabrica RNS" já existe e é acessível a ele — o que faltaria é inicializar/
-alinhar o schema hospedado com as migrations aprovadas, não criar o
-projeto do zero.
+Atualização (revalidação do fiscal sobre o head `f07aa42`): o fiscal
+respondeu ao pedido de identificação exata feito na nota anterior deste
+arquivo, com:
 
-Antes de reescrever a linha acima para afirmar isso, verifiquei
-diretamente: `mcp__Supabase__list_projects` nesta sessão retorna 7
-projetos, nenhum com nome ou referência que combine com "Fábrica Apps
-RNS"/"fabricarns" — são projetos de um domínio completamente diferente
-("Projeto Memoria Celebro App", "App Reflex 02", "reflexao-pessoal",
-"memoria-reflexiva-dev", "Biblioteca-Celebro-Reflex-es-",
-"Celebro-Biblioteca-Cloude", "reflex-01").
+- name: `App Fabrica RNS`
+- project ref / id: `lwjhekfwlnqncxwureda`
+- organization_id: `iicymqndbjifbowxnueh`
+- region: `us-east-1`
+- PostgreSQL: 17
+- status: `ACTIVE_HEALTHY`
 
-Não vou reescrever esta tabela para afirmar que o projeto existe sem
-conseguir apontar para ele — seria trocar uma imprecisão por outra. As
-duas hipóteses continuam em aberto: (a) o fiscal enxerga um projeto sob
-uma conta/organização Supabase diferente da que esta sessão tem
-conectada, ou (b) o projeto ainda não existe e a leitura do fiscal está
-equivocada. Pedido ao fiscal, via comentário na PR: o `project ref` (ou
-`organization_id`) exato do projeto "App Fabrica RNS", para eu confirmar
-com `mcp__Supabase__get_project` antes de qualquer alinhamento de schema.
+Confirmei de forma independente com `mcp__Supabase__get_project(id:
+"lwjhekfwlnqncxwureda")` nesta sessão — retornou os mesmos dados
+(`ACTIVE_HEALTHY`, `us-east-1`, PG 17.6.1.166). **O projeto existe e é
+real.** A divergência anterior (`mcp__Supabase__list_projects` nesta
+sessão não listava este projeto entre os 7 retornados) fica registrada
+como um limite de escopo/conta da conexão Supabase desta sessão — o
+lookup direto por ID funciona mesmo quando a listagem não o inclui,
+então a conexão do Claude Code parece ter acesso a este projeto por ID
+sem ele aparecer no `list_projects` desta sessão. Não investiguei a causa
+exata (diferença de organização/permissão vs. escopo do listing); não é
+um bloqueio para nenhum trabalho desta PR.
+
+**Pendência real que fica, segundo o próprio fiscal:** o projeto hospedado
+ainda não está alinhado ao schema completo desta PR. No histórico de
+migrations visível ao fiscal, consta hoje só `agent_bridge_ledger`
+(`20260921041330`, aplicada pela trilha de integração/fiscal — é a mesma
+migration que chegou nesta branch via merge de `main`, PR #4). **Não
+aplicar as migrations desta PR (`0001`–`0013`) no projeto hospedado antes
+de validação/ordenação deliberada do rollout** — meu papel aqui continua
+sendo só escrever e testar as migrations localmente/via CI; aplicar no
+projeto real hospedado é ação de infraestrutura fora do meu mandato.
 
 ## Conclusão sobre o rótulo "Sprint 1.1"
 

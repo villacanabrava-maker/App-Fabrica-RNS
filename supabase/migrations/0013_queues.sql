@@ -1,8 +1,15 @@
 -- ============================================================
--- 0012 — Fila durável (pgmq / Supabase Queues)
+-- 0013 — Fila durável (pgmq / Supabase Queues)
 --
 -- Item do checklist do Sprint 1.1 (docs/08-PLANO-DE-IMPLEMENTACAO/
 -- 02-FASE-1-APP-FUNCIONAL.md) apontado como ausente por revisão técnica.
+--
+-- Renumerada de 0012 para 0013: o merge de main trouxe
+-- 0012_agent_bridge_ledger.sql (PR #4, Agent Bridge), que já ocupava o
+-- número 0012 — colisão de chave primária em schema_migrations detectada
+-- pelo Database CI (`duplicate key value violates unique constraint
+-- "schema_migrations_pkey" ... Key (version)=(0012) already exists`).
+-- Conteúdo inalterado, só o número/nome do arquivo.
 --
 -- pgmq entrega a notificação "há trabalho" com janela de visibilidade;
 -- o estado durável do job — dono do lease, tentativas, idempotency_key —
