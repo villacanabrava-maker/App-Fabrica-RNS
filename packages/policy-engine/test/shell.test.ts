@@ -69,6 +69,49 @@ describe('isShellCommandAllowed — injeção via metacaracteres de shell (regre
   });
 });
 
+// ★ Achado do fiscal (revalidação 2026-09-21, item 4): o atalho "ferramenta
+// liberada por inteiro" tratava `node`, `npm`, `pnpm` e `npx` como qualquer
+// outra ferramenta — mas essas têm, embutida, uma forma de executar código
+// ou pacote arbitrário sem nenhum metacaractere de shell. Estes testes
+// travam a correção por capability (não por lista de flags).
+describe('isShellCommandAllowed — executores genéricos com capacidade de execução arbitrária (regressão)', () => {
+  const dangerousInvocations = [
+    'node -e "require(\'child_process\').execSync(\'id\')"',
+    'node --eval "require(\'child_process\').execSync(\'id\')"',
+    'node --eval=require("child_process").execSync("id")',
+    'node -p "1+1"',
+    'node --print "1+1"',
+    'npm exec cowsay hi',
+    'npm x cowsay hi',
+    'npx cowsay hi',
+    'npx -y cowsay hi',
+    'npx --yes cowsay hi',
+    'pnpm exec cowsay hi',
+    'pnpm dlx cowsay hi',
+  ];
+
+  for (const command of dangerousInvocations) {
+    it(`nega "${command}" mesmo com o primeiro token (ferramenta) liberado por inteiro`, () => {
+      expect(isShellCommandAllowed(command, workspaceWrite)).toBe(false);
+    });
+  }
+
+  it('libera as ferramentas sozinhas, sem argumento (help/no-op, inofensivo)', () => {
+    expect(isShellCommandAllowed('node', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('npm', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('npx', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('pnpm', workspaceWrite)).toBe(true);
+  });
+
+  it('continua liberando uso legítimo destas ferramentas (não é o vetor reportado)', () => {
+    expect(isShellCommandAllowed('npm install', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('npm run build', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('pnpm build', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('pnpm test', workspaceWrite)).toBe(true);
+    expect(isShellCommandAllowed('node script.js', workspaceWrite)).toBe(true);
+  });
+});
+
 describe('isShellCommandAllowed — deny sempre vence', () => {
   it('nega um comando explicitamente proibido mesmo sem metacaracteres', () => {
     expect(isShellCommandAllowed('sudo', workspaceWrite)).toBe(false);
