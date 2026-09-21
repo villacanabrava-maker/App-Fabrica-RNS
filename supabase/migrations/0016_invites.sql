@@ -141,10 +141,10 @@ begin
   end if;
 
   if exists (
-    select 1 from factory.invites
-    where organization_id = p_organization_id
-      and lower(email) = v_email
-      and status = 'pending'
+    select 1 from factory.invites inv
+    where inv.organization_id = p_organization_id
+      and lower(inv.email) = v_email
+      and inv.status = 'pending'
   ) then
     raise exception 'já existe um convite pendente para este e-mail — revogue antes de criar outro';
   end if;
