@@ -26,9 +26,34 @@ Checklist original: `docs/08-PLANO-DE-IMPLEMENTACAO/02-FASE-1-APP-FUNCIONAL.md`,
 
 | Item | Por que não está nesta PR | O que resolve |
 |---|---|---|
-| Projeto Factory Supabase real (hospedado) | Exige credenciais/conta que este agente não tem e não deve solicitar | Ação humana: criar o projeto e configurar `SUPABASE_*` conforme `.env.example` |
+| Projeto Factory Supabase real (hospedado) — inicialização/alinhamento com as migrations desta PR | Ver nota abaixo: há uma divergência não resolvida entre a fiscalização e a verificação direta deste agente sobre se o projeto já existe | Ver nota abaixo |
 | Ruleset de branch protection em `main` | Configuração de repositório GitHub, fora do diff de código; decisão de quais checks são obrigatórios é do dono do repositório | Ação humana no GitHub (Settings → Rules) |
 | `scripts/intelligence/{validate-schemas,validate-registry,build-projections,check-drift,validate-fixtures,run-evals}.ts` | Entregáveis da **Fase 0** (`docs/08-PLANO-DE-IMPLEMENTACAO/01-PLANO-MESTRE-DE-IMPLEMENTACAO.md` §3), fase distinta da Fase 1 e nunca no checklist do Sprint 1.1 — não é um corte de escopo desta correção, é uma lacuna pré-existente e maior, sinalizada aqui para não ficar escondida atrás do guard de CI que a torna `skipped` | Vira uma entrega própria, do tamanho de um sprint, não um item avulso desta correção |
+
+## Nota — divergência sobre o projeto Supabase hospedado (aberta, não resolvida)
+
+Revalidação do fiscal (comentário na PR #2, após `b083cc3`) apontou esta
+tabela como desatualizada: segundo o fiscal, o projeto hospedado "App
+Fabrica RNS" já existe e é acessível a ele — o que faltaria é inicializar/
+alinhar o schema hospedado com as migrations aprovadas, não criar o
+projeto do zero.
+
+Antes de reescrever a linha acima para afirmar isso, verifiquei
+diretamente: `mcp__Supabase__list_projects` nesta sessão retorna 7
+projetos, nenhum com nome ou referência que combine com "Fábrica Apps
+RNS"/"fabricarns" — são projetos de um domínio completamente diferente
+("Projeto Memoria Celebro App", "App Reflex 02", "reflexao-pessoal",
+"memoria-reflexiva-dev", "Biblioteca-Celebro-Reflex-es-",
+"Celebro-Biblioteca-Cloude", "reflex-01").
+
+Não vou reescrever esta tabela para afirmar que o projeto existe sem
+conseguir apontar para ele — seria trocar uma imprecisão por outra. As
+duas hipóteses continuam em aberto: (a) o fiscal enxerga um projeto sob
+uma conta/organização Supabase diferente da que esta sessão tem
+conectada, ou (b) o projeto ainda não existe e a leitura do fiscal está
+equivocada. Pedido ao fiscal, via comentário na PR: o `project ref` (ou
+`organization_id`) exato do projeto "App Fabrica RNS", para eu confirmar
+com `mcp__Supabase__get_project` antes de qualquer alinhamento de schema.
 
 ## Conclusão sobre o rótulo "Sprint 1.1"
 
