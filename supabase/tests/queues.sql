@@ -20,8 +20,12 @@ select isnt(
   'pgmq.send enfileira uma mensagem e retorna um msg_id'
 );
 
+-- vt=0: a mensagem fica visível de novo imediatamente após esta leitura
+-- (em vez de ficar invisível por 30s), para que o teste de archive logo
+-- abaixo ainda a encontre. Ver pgmq.read: vt define clock_timestamp() +
+-- make_interval(secs => vt); vt=0 equivale a "sem espera".
 select is(
-  (select count(*)::int from pgmq.read('workflow_jobs', 30, 10)),
+  (select count(*)::int from pgmq.read('workflow_jobs', 0, 10)),
   1,
   'pgmq.read entrega a mensagem enfileirada dentro da janela de visibilidade'
 );
