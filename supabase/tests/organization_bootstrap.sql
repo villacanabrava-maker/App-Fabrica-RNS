@@ -5,7 +5,7 @@
 -- fiscal_e2e3a330b5652c9b5bb3e602) na PR #5, antes de qualquer merge.
 -- ============================================================
 begin;
-select plan(13);
+select plan(17);
 
 insert into auth.users (id) values
   ('11111111-0000-0000-0000-000000000001'),
@@ -162,6 +162,62 @@ select throws_ok(
   $$ select factory.create_organization('Organização A duplicada', 'org-bootstrap-a') $$,
   '23505', null,
   'slug duplicado é rejeitado (unique constraint) — mesmo comportamento de antes desta migration'
+);
+
+-- ---------- 7. rollback real: falha no 2º insert não deixa organização órfã ----------
+-- Achado do fiscal (fiscal_2188a6de173e86bda01b65f5): a atomicidade era
+-- afirmada (plpgsql sem exception handler → transação da própria
+-- chamada desfaz tudo) mas nunca testada — nenhum caso existente
+-- provocava falha no 2º insert (memberships). Cenário real que produz
+-- essa falha: auth.uid() aponta para um usuário que existe em
+-- auth.users mas não tem espelho em factory.users (inconsistência
+-- entre as duas tabelas, ou uma corrida entre trigger de signup e
+-- criação da organização) — memberships.user_id referencia
+-- factory.users(id), então o insert da membership viola a FK.
+--
+-- reset role antes do insert: `authenticated` (papel ainda em efeito do
+-- teste 11) não tem privilégio de escrita em auth.users — só o papel de
+-- conexão do próprio teste (o mesmo usado nos inserts do topo do
+-- arquivo, antes de qualquer "set local role") consegue.
+reset role;
+insert into auth.users (id) values ('33333333-0000-0000-0000-000000000003');
+-- deliberadamente SEM insert correspondente em factory.users
+
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"33333333-0000-0000-0000-000000000003"}', true);
+
+select throws_ok(
+  $$ select factory.create_organization('Organização Órfã', 'org-rollback-test') $$,
+  '23503', null,
+  'auth.uid() sem linha em factory.users falha por FK na membership — não por guard da função'
+);
+
+-- reset role: volta ao papel de conexão do teste (bypassa RLS) para
+-- provar que não sobrou organização órfã — um usuário nesta condição
+-- não enxergaria a org via RLS de qualquer forma, então checar "pelos
+-- olhos" desse usuário não provaria rollback nenhum.
+reset role;
+
+select is(
+  (select count(*)::int from factory.organizations where slug = 'org-rollback-test'),
+  0,
+  'falha no insert da membership desfaz também o insert da organização — sem órfã'
+);
+
+-- ---------- 8. ACL efetiva no catálogo (não só o texto do GRANT/REVOKE) ----------
+-- Achado do fiscal: os DDLs de revoke/grant provam intenção, não o
+-- estado efetivo após todas as 14 migrations aplicadas em sequência —
+-- alguma migration anterior poderia, em tese, ter concedido EXECUTE de
+-- volta a PUBLIC/anon sem ninguém notar. has_function_privilege() lê o
+-- catálogo de verdade (pg_proc/pg_authid via ACL), não texto de SQL.
+select ok(
+  not has_function_privilege('anon', 'factory.create_organization(text, text)', 'EXECUTE'),
+  'anon não tem EXECUTE em create_organization (prova que PUBLIC também não tem — anon nunca recebeu grant direto)'
+);
+
+select ok(
+  has_function_privilege('authenticated', 'factory.create_organization(text, text)', 'EXECUTE'),
+  'authenticated tem EXECUTE em create_organization'
 );
 
 select * from finish();
