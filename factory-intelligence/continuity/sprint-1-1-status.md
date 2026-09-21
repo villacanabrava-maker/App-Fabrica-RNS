@@ -66,6 +66,12 @@ de validação/ordenação deliberada do rollout** — meu papel aqui continua
 sendo só escrever e testar as migrations localmente/via CI; aplicar no
 projeto real hospedado é ação de infraestrutura fora do meu mandato.
 
+(Verificação independente desta sessão, 2026-09-21: chamei
+`mcp__Supabase__get_project(id: "lwjhekfwlnqncxwureda")` de novo e recebi
+exatamente os mesmos dados — `ACTIVE_HEALTHY`, `us-east-1`, PG
+17.6.1.166, `organization_id: iicymqndbjifbowxnueh`. Confirma o que está
+acima; nada a corrigir aqui.)
+
 ## Conclusão sobre o rótulo "Sprint 1.1"
 
-Com a correção acima, todo item do checklist do Sprint 1.1 que é código deste repositório está feito e testado. Os dois itens pendentes (projeto Supabase real, ruleset) são infraestrutura/configuração fora do controle deste agente — não bugs, não escopo esquecido. A Fase 0 (scripts/intelligence) é trabalho separado e maior, não uma tarefa do Sprint 1.1.
+Com a correção acima, todo item do checklist do Sprint 1.1 que é código deste repositório está feito e testado. Os itens pendentes (schema aplicado no Supabase hospedado, ruleset) são infraestrutura/configuração fora do controle deste agente — não bugs, não escopo esquecido. A Fase 0 (scripts/intelligence) é trabalho separado e maior, não uma tarefa do Sprint 1.1.
