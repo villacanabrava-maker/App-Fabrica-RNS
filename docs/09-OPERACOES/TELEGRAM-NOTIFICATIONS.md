@@ -1,20 +1,95 @@
-# Notification Bridge — Telegram
+# Notification Bridge — Telegram (V2)
 
 ## Objetivo
 
-Notificar o responsavel humano quando a Fabrica RNS precisar de decisao ou concluir trabalho relevante. Telegram e canal de alerta e relatorio; aprovacao e merge permanecem no GitHub.
+Notificar o responsavel humano — que e **nao tecnico** — quando a Fabrica RNS precisar de decisao ou concluir trabalho relevante, de um jeito que responda sem esforco: o que aconteceu, se e bom/mau/informativo, quem esta trabalhando, se precisa agir agora e qual e o proximo passo. Telegram e canal de alerta e relatorio; aprovacao e merge permanecem no GitHub.
 
-## Eventos iniciais
+## Origem dos eventos
 
-- PR aberta, marcada ready-for-review ou com revisao solicitada.
-- Conclusao dos workflows Application CI, Database CI, Security, Intelligence CI e Fiscal Bridge.
-- Eventos de Supabase e Vercel devem ser integrados apenas quando forem operacionais e relevantes; nunca notificar cada operacao de dados.
+1. GitHub Actions (`.github/workflows/human-notifications.yml`): PR aberta/ready-for-review/revisao solicitada; conclusao de Application CI, Database CI, Security, Intelligence CI e Fiscal Bridge.
+2. Orquestrador local (`_RNS-CONSTRUTOR/notify.ps1`, fora deste repositorio): eventos do Constructor (inicio, troca de provider, bloqueio, conclusao, todos os motores indisponiveis) e do ciclo de revisao (findings do Fiscal, revisao concluida/CLEAR, gate de aprovacao, revisor independente indisponivel). Esta e a unica fonte que sabe o estado real de Copilot/Anthropic/OpenAI/Fiscal/Reviewer e por isso e quem preenche `provider_status`.
 
-## Seguranca
+## Schema do evento (`POST /api/notify-telegram`)
 
-O endpoint `/api/notify-telegram` aceita somente POST autenticado por `FISCAL_BRIDGE_SECRET`, reaproveitando o mesmo boundary do Agent Bridge ja operacional.
+```
+event_key, category, severity, title, human_summary, human_action,
+project, repository, pr_number, branch, sha, cycle_id, task_id,
+provider, provider_status, provider_history, checks, findings, risks,
+blocking_reason, technical_detail, next_step, url, details_url, checks_url
+```
 
-As credenciais do bot nunca ficam no GitHub, no codigo ou em comentarios. Elas ficam somente nas Environment Variables do projeto Vercel `fabricarns`.
+Campo ausente fica ausente — nunca e inventado. Compatibilidade: um caller antigo que so envie `{event_key,title,summary,url}` continua funcionando (`summary` e tratado como `human_summary`).
+
+### `category`
+
+`INFO | WORKING | BLOCKED | HUMAN_ACTION | COMPLETED | SECURITY`. `SECURITY` so deve ser usada quando a origem classificou o evento estruturalmente (ex.: violacao de papel/ACK estranho detectada pelo coordenador) — nunca por busca de palavras como "RLS"/"RBAC"/"secret" dentro de texto livre.
+
+### `human_action`
+
+`NONE | REVIEW | APPROVE | REJECT_OR_DECIDE | RESTORE_PROVIDER | CONFIGURE_SECRET | INVESTIGATE`.
+
+Regra central: um finding do Fiscal **nao** vira acao humana automaticamente. Se o construtor consegue corrigir e nenhuma decisao humana e necessaria, `human_action=NONE` e a mensagem diz "o construtor esta trabalhando na correcao". So existe acao humana quando ha uma decisao que exige autoridade humana de fato: mudanca de escopo, conflito de requisitos, autorizacao protegida, aprovacao final/merge, alteracao de budget/seguranca, ou motor sem fallback que precisa ser restaurado manualmente.
+
+### `provider_status`
+
+Objeto com chaves conhecidas (todas opcionais, `UNKNOWN` quando nao houver evidencia — nunca forcado):
+`watcher, constructor, constructor_owner, automation, constructor_copilot, constructor_anthropic, constructor_openai, fiscal_openai, reviewer_anthropic, ci, vercel`.
+
+`constructor_owner` (quem detem a execucao, de `provider-owners.json`) e `automation` (se o sistema esta autorizado a acordar/escrever automaticamente, de `AutomationEnabled`) sao conceitos **separados** e nunca inferidos um do outro.
+
+Estados possiveis: `HEALTHY | WORKING | DEGRADED | UNAVAILABLE_CREDIT | UNAVAILABLE_AUTH | DISABLED_BY_POLICY | CIRCUIT_OPEN | UNKNOWN` (mais `ENABLED/DISABLED` para `automation` e `IDLE/BLOCKED` para `constructor`). O endpoint traduz para o operador (`HEALTHY→disponivel`, `UNAVAILABLE_CREDIT→sem creditos`, `DISABLED_BY_POLICY→reservado/desativado`, etc.) — o codigo tecnico nunca e a linha principal da mensagem, so aparece numa linha secundaria "Detalhe:" (`technical_detail`).
+
+## Formato da mensagem (Telegram)
+
+Ordem fixa, com a pergunta humana **antes** dos detalhes tecnicos:
+
+```
+icone + titulo
+Projeto · PR · SHA
+O que aconteceu
+VOCE PRECISA FAZER ALGO AGORA? SIM/NAO
+O que a Fabrica esta fazendo agora
+Estado dos motores
+Validacoes
+Problemas
+Proximo passo
+Abrir PR · Ver CI · Ver detalhes
+```
+
+Quando `human_action=APPROVE`, a frase "A Fabrica NAO fara merge automaticamente." e injetada pelo proprio endpoint (nunca depende do caller lembrar de escreve-la). Nenhum botao de Aprovar/Rejeitar/Merge/Executar correcao e enviado nesta versao — so links (Abrir PR / Ver CI / Ver detalhes); Telegram permanece informativo, GitHub permanece canonico para decisao.
+
+Se o corpo passar do limite seguro (`MAX_TEXT=3500`), o texto e cortado e o rodape passa a apontar para `details_url` — "Telegram = resumo, GitHub = relatorio completo".
+
+## Comentario GitHub `[RNS-HUMAN-STATUS]`
+
+Quando o evento tem `cycle_id`/`task_id`, o orquestrador local publica/atualiza (nunca duplica) um comentario `[RNS-HUMAN-STATUS]` com o relatorio tecnico completo (todos os 11 subsistemas, historico de providers, findings, riscos, checks) — sem o limite de tamanho do Telegram.
+
+### Contrato versionado do publisher local
+
+O publisher vive em `_RNS-CONSTRUTOR/notify.ps1` (fora deste repositorio), mas o contrato que ele DEVE cumprir e versionado aqui:
+
+- chave logica de upsert: `cycle_id + task_id`; o mesmo par atualiza o comentario existente em vez de criar outro;
+- marcador exclusivo de propriedade: o corpo gerenciado comeca com `[RNS-HUMAN-STATUS]`;
+- selecao segura: somente comentarios com esse marcador podem ser candidatos a update;
+- exclusao explicita: comentarios que comecem com `/fiscal`, `### Fiscal OpenAI` ou `[RNS-CLAUDE-REVIEW]` nunca podem ser editados pelo publisher;
+- fail-open: falha ao localizar/criar/atualizar Human Status e registrada, mas nunca derruba Constructor/Coordinator/Watcher;
+- autoridade: Human Status e informativo; nunca publica aprovacao, merge, reject ou comando de autoridade em nome do humano;
+- idempotencia: repeticao do mesmo evento/cycle/task nao cria comentario adicional;
+- autenticacao/autorizacao: usa apenas a identidade GitHub ja concedida ao runtime local e o menor escopo necessario para comentarios; nao recebe segredo de producao do Telegram.
+
+Os self-checks do runtime local devem provar, no minimo: create, update do mesmo marcador, repeticao idempotente, falha fail-open e preservacao de comentarios Fiscal/Claude.
+
+## Seguranca (defesa em camadas)
+
+1. Allowlist: qualquer campo fora do schema acima (dump de ambiente, headers, stdout bruto de provider) e descartado antes de qualquer outro processamento.
+2. Redaction: todo campo textual que pode sair do boundary passa por `redact()`, que reconhece padroes de segredo conhecidos deste projeto (nome de variavel=valor, `Bearer `, `ghp_`, `sk-`, `AKIA`, tokens longos genericos).
+3. Telegram HTML: texto visivel passa por escape de HTML; URLs passam por normalizacao estrutural e, quando usadas em `href`, por escape de atributo (`& < > " '`). O truncamento ocorre por blocos/linhas completos, nunca por corte cego do HTML final.
+4. GitHub Markdown: o comentario `[RNS-HUMAN-STATUS]` NAO usa `escapeHtml` global, porque isso destruiria Markdown legivel como `a < b`. Em vez disso, usa redaction + neutralizacao especifica da superficie Markdown: remove blocos `<script>`, neutraliza mencoes/links e marcadores externos perigosos e limita campos. Essa diferenca entre as duas superficies e intencional e coberta por testes.
+5. Limite de tamanho sempre aplicado.
+
+O endpoint `/api/notify-telegram` continua aceitando somente POST autenticado por `FISCAL_BRIDGE_SECRET`.
+
+As credenciais do bot nunca ficam no GitHub, no codigo ou em comentarios. Elas ficam somente nas Environment Variables do projeto Vercel `fabricarns`. O orquestrador local le `FISCAL_BRIDGE_URL`/`FISCAL_BRIDGE_SECRET` apenas de variavel de ambiente do processo — nunca de `config.json`, nunca inventados; na ausencia deles o transporte fica `UNAVAILABLE_CONFIG` e o resto do sistema (Constructor/Coordinator/Watcher) continua funcionando normalmente.
 
 ## Variaveis no Vercel `fabricarns`
 
@@ -27,26 +102,63 @@ No GitHub Actions:
 - `FISCAL_BRIDGE_URL` (ja existente)
 - `FISCAL_BRIDGE_SECRET` (ja existente)
 
-## Formato da mensagem
+No ambiente local (fora deste repositorio, nunca em `config.json`):
 
-Cada alerta inclui:
+- `FISCAL_BRIDGE_URL`, `FISCAL_BRIDGE_SECRET` — mesmas variaveis, lidas so do ambiente do processo do orquestrador.
 
-1. titulo;
-2. resumo operacional;
-3. link para GitHub quando houver;
-4. `event_key` para auditoria.
+## Contrato do workflow GitHub Actions
+
+O arquivo `.github/workflows/human-notifications.yml` e deliberadamente limitado:
+
+- gatilhos: `pull_request_target` apenas para `opened`, `ready_for_review`, `review_requested`; e `workflow_run` apenas para workflows nomeados e conclusao;
+- permissao explicita minima: `contents: read` e `pull-requests: read`; nenhuma permissao de escrita;
+- o job de PR exige `github.event.pull_request.head.repo.full_name == github.repository`, evitando disponibilizar os segredos do bridge para PR de fork;
+- nenhum checkout nem execucao do codigo da PR ocorre nesse workflow;
+- o transporte e fail-open: configuracao ausente ou falha do `curl` gera `::warning::` e nao torna o workflow principal vermelho;
+- o workflow nunca aprova nem faz merge.
+
+Essas invariantes sao verificadas por teste estatico versionado em `api/human-notifications.workflow.test.js`.
+
+## Aderencia canonica
+
+Esta V2 aplica as fontes normativas sem inventar autoridade nova:
+
+- **Constituicao, Art. 1 (Soberania humana):** Telegram e Human Status sao informativos; aprovacao/merge continuam como decisao humana autenticada.
+- **Constituicao, Art. 3 (Orquestracao deterministica):** somente o Orchestrator efetiva transicoes; o bridge apenas renderiza/notifica eventos recebidos.
+- **Constituicao, Art. 7 (Autor nao e juiz final):** a notificacao nao substitui revisao independente nem gates determinísticos.
+- **Definition of Done de tarefa:** testes de sucesso/falha, typecheck, lint, evidencia, revisao independente, findings bloqueantes resolvidos e CI verde continuam sendo requisitos; notificacao nao relaxa nenhum deles.
+- **Definition of Done de etapa:** aprovacao humana com `subject_sha` continua obrigatoria antes de merge.
+- **SECURITY.md — privilegio minimo:** o workflow declara apenas `contents: read` e `pull-requests: read`; nao possui write.
+- **SECURITY.md — codigo de PR nao confiavel:** embora o gatilho de notificacao de PR seja `pull_request_target`, o job nao faz checkout nem executa codigo da PR e ainda exige `head.repo.full_name == github.repository` antes de expor os secrets do bridge. Assim, o padrao perigoso documentado (secret + checkout/execucao de PR nao confiavel) nao existe neste workflow.
+- **SECURITY.md — validacao de saida:** o endpoint trata payload de caller como entrada nao confiavel e valida schema/semantica antes de renderizar.
+- **SECURITY.md — segredo:** tokens do Telegram e segredo do bridge ficam fora do codigo/comentarios e nunca sao enviados ao navegador.
+
+### Evidencia verificavel por SHA
+
+Para uma revisao Fiscal, as fontes que devem ser anexadas/consultadas no SHA exato sao:
+
+1. `api/notify-telegram.js` — implementacao completa do boundary;
+2. `api/notify-telegram.test.js` e `api/human-notifications.workflow.test.js` — regressao funcional/seguranca;
+3. `.github/workflows/human-notifications.yml` — gatilhos, permissoes, filtros e fail-open;
+4. este documento — contrato operacional, separacao Telegram HTML/GitHub Markdown e publisher local;
+5. as secoes normativas listadas acima na Constituicao, DoD e `SECURITY.md`;
+6. log do job `quality` do HEAD, comprovando execucao da suite `api/**/*.test.js`.
+
+Se qualquer uma dessas evidencias estiver omitida no bundle inline, isso e uma **lacuna de evidencia do bundle**, nao prova por si so um defeito de implementacao.
 
 ## Ativacao
 
 1. Merge humano da PR.
 2. Confirmar as variaveis `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` no Vercel.
 3. Aguardar o deployment de producao do `fabricarns` ficar READY.
-4. Executar teste E2E controlado via endpoint.
-5. Confirmar recebimento no Telegram e ausencia de segredos nos logs.
-6. So entao declarar o canal operacional.
+4. Configurar `FISCAL_BRIDGE_URL`/`FISCAL_BRIDGE_SECRET` no ambiente do processo do orquestrador local (decisao humana separada; o agente construtor nao configura isso por conta propria).
+5. Manter `HumanNotificationsEnabled=false` em `config.json` do orquestrador local durante testes; so um humano muda para `true` apos revisar o relatorio de ativacao.
+6. Executar teste E2E controlado via endpoint.
+7. Confirmar recebimento no Telegram e ausencia de segredos nos logs.
+8. So entao declarar o canal operacional.
 
 ## Limites atuais
 
-- Ainda nao ha deduplicacao persistente em banco; o `event_key` identifica logicamente cada evento.
-- A aprovacao de PR nunca acontece pelo Telegram nesta fase.
-- Banco e Vercel ainda nao emitem eventos diretos para este canal; entram numa etapa posterior.
+- Dedupe do lado GitHub Actions/endpoint e best-effort, em memoria, por `event_key`, dentro de um container Vercel "morno" — nao ha persistencia nova so para isso nesta versao (decisao explicita: agrupamento/dedupe server-side com banco fica para uma evolucao separada, se necessario). O `gate.json` do orquestrador local ja agrega os checks por poll, o que cobre o caso pratico de "nao mandar 5 telegrams" para eventos originados localmente.
+- A aprovacao de PR nunca acontece pelo Telegram.
+- Banco e Vercel entram no `provider_status` (`ci`, `vercel`) so como leitura do `gate.json` local; nenhum probe novo e feito so para notificar.

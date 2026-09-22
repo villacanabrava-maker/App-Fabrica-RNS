@@ -12,7 +12,7 @@
     "build": "pnpm -r --if-present run build",
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "test:unit": "vitest run packages",
+    "test:unit": "vitest run packages api",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:storybook": "pnpm --filter @rns/control-plane --if-present run test:storybook",
     "test:e2e": "pnpm --filter @rns/control-plane --if-present run test:e2e",
@@ -23,6 +23,7 @@
     "@vitest/coverage-v8": "5.0.1",
     "tsx": "^4.19.2",
     "typescript": "7.0.2",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "yaml": "2.9.1"
   }
 }
