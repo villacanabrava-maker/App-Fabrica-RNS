@@ -62,14 +62,30 @@ Se o corpo passar do limite seguro (`MAX_TEXT=3500`), o texto e cortado e o roda
 
 ## Comentario GitHub `[RNS-HUMAN-STATUS]`
 
-Quando o evento tem `cycle_id`/`task_id`, o orquestrador local publica/atualiza (nunca duplica) um comentario `[RNS-HUMAN-STATUS]` com o relatorio tecnico completo (todos os 11 subsistemas, historico de providers, findings, riscos, checks) — sem o limite de tamanho do Telegram. Nunca edita comentarios do Fiscal (`/fiscal...`) nem do revisor (`[RNS-CLAUDE-REVIEW]`).
+Quando o evento tem `cycle_id`/`task_id`, o orquestrador local publica/atualiza (nunca duplica) um comentario `[RNS-HUMAN-STATUS]` com o relatorio tecnico completo (todos os 11 subsistemas, historico de providers, findings, riscos, checks) — sem o limite de tamanho do Telegram.
+
+### Contrato versionado do publisher local
+
+O publisher vive em `_RNS-CONSTRUTOR/notify.ps1` (fora deste repositorio), mas o contrato que ele DEVE cumprir e versionado aqui:
+
+- chave logica de upsert: `cycle_id + task_id`; o mesmo par atualiza o comentario existente em vez de criar outro;
+- marcador exclusivo de propriedade: o corpo gerenciado comeca com `[RNS-HUMAN-STATUS]`;
+- selecao segura: somente comentarios com esse marcador podem ser candidatos a update;
+- exclusao explicita: comentarios que comecem com `/fiscal`, `### Fiscal OpenAI` ou `[RNS-CLAUDE-REVIEW]` nunca podem ser editados pelo publisher;
+- fail-open: falha ao localizar/criar/atualizar Human Status e registrada, mas nunca derruba Constructor/Coordinator/Watcher;
+- autoridade: Human Status e informativo; nunca publica aprovacao, merge, reject ou comando de autoridade em nome do humano;
+- idempotencia: repeticao do mesmo evento/cycle/task nao cria comentario adicional;
+- autenticacao/autorizacao: usa apenas a identidade GitHub ja concedida ao runtime local e o menor escopo necessario para comentarios; nao recebe segredo de producao do Telegram.
+
+Os self-checks do runtime local devem provar, no minimo: create, update do mesmo marcador, repeticao idempotente, falha fail-open e preservacao de comentarios Fiscal/Claude.
 
 ## Seguranca (defesa em camadas)
 
 1. Allowlist: qualquer campo fora do schema acima (dump de ambiente, headers, stdout bruto de provider) e descartado antes de qualquer outro processamento.
-2. Todo texto vai por `escapeHtml`.
-3. Todo texto tambem passa por uma redacao adicional (`redact()`), que reconhece padroes de segredo conhecidos deste projeto (nome de variavel=valor, `Bearer `, `ghp_`, `sk-`, `AKIA`, tokens longos genericos) — nao depende so de prefixos.
-4. Limite de tamanho sempre aplicado.
+2. Redaction: todo campo textual que pode sair do boundary passa por `redact()`, que reconhece padroes de segredo conhecidos deste projeto (nome de variavel=valor, `Bearer `, `ghp_`, `sk-`, `AKIA`, tokens longos genericos).
+3. Telegram HTML: texto visivel passa por escape de HTML; URLs passam por normalizacao estrutural e, quando usadas em `href`, por escape de atributo (`& < > " '`). O truncamento ocorre por blocos/linhas completos, nunca por corte cego do HTML final.
+4. GitHub Markdown: o comentario `[RNS-HUMAN-STATUS]` NAO usa `escapeHtml` global, porque isso destruiria Markdown legivel como `a < b`. Em vez disso, usa redaction + neutralizacao especifica da superficie Markdown: remove blocos `<script>`, neutraliza mencoes/links e marcadores externos perigosos e limita campos. Essa diferenca entre as duas superficies e intencional e coberta por testes.
+5. Limite de tamanho sempre aplicado.
 
 O endpoint `/api/notify-telegram` continua aceitando somente POST autenticado por `FISCAL_BRIDGE_SECRET`.
 
@@ -89,6 +105,19 @@ No GitHub Actions:
 No ambiente local (fora deste repositorio, nunca em `config.json`):
 
 - `FISCAL_BRIDGE_URL`, `FISCAL_BRIDGE_SECRET` — mesmas variaveis, lidas so do ambiente do processo do orquestrador.
+
+## Contrato do workflow GitHub Actions
+
+O arquivo `.github/workflows/human-notifications.yml` e deliberadamente limitado:
+
+- gatilhos: `pull_request_target` apenas para `opened`, `ready_for_review`, `review_requested`; e `workflow_run` apenas para workflows nomeados e conclusao;
+- permissao explicita minima: `contents: read` e `pull-requests: read`; nenhuma permissao de escrita;
+- o job de PR exige `github.event.pull_request.head.repo.full_name == github.repository`, evitando disponibilizar os segredos do bridge para PR de fork;
+- nenhum checkout nem execucao do codigo da PR ocorre nesse workflow;
+- o transporte e fail-open: configuracao ausente ou falha do `curl` gera `::warning::` e nao torna o workflow principal vermelho;
+- o workflow nunca aprova nem faz merge.
+
+Essas invariantes sao verificadas por teste estatico versionado em `api/human-notifications.workflow.test.js`.
 
 ## Ativacao
 
