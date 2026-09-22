@@ -12,7 +12,7 @@
     "build": "pnpm -r --if-present run build",
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "test:unit": "vitest run packages",
+    "test:unit": "vitest run packages api",
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:storybook": "pnpm --filter @rns/control-plane --if-present run test:storybook",
     "test:e2e": "pnpm --filter @rns/control-plane --if-present run test:e2e",
