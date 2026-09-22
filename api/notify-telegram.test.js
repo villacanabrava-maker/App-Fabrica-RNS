@@ -482,6 +482,61 @@ describe("security-hardening-regressions", () => {
     expect(JSON.stringify(res.body)).not.toContain("SECRET_TOKEN");
   });
 
+
+
+  it("accepts legitimate GitHub URLs with uppercase path segments and rejects ASCII controls", async () => {
+    const good = "https://github.com/villacanabrava-maker/App-Fabrica-RNS/pull/11";
+    expect(sanitizeEvent({ ...BASE, url: good }).url).toBe(good);
+
+    const resGood = mockRes();
+    await handler(req({ ...BASE, event_key: "e-uppercase-url", url: good }), resGood);
+    expect(resGood.statusCode).toBe(200);
+
+    const bad = "https://github.com/villacanabrava-maker/App-Fabrica-RNS/pull/11\u0001";
+    const resBad = mockRes();
+    await handler(req({ ...BASE, event_key: "e-control-url", url: bad }), resBad);
+    expect(resBad.statusCode).toBe(400);
+    expect(resBad.body.invalid).toContain("url");
+  });
+
+  it("rejects malformed optional identity and structured fields instead of silently dropping them", async () => {
+    const invalidCases = [
+      { sha: "not-a-sha", field: "sha" },
+      { sha: 1234567, field: "sha" },
+      { pr_number: 0, field: "pr_number" },
+      { pr_number: -2, field: "pr_number" },
+      { pr_number: 1.5, field: "pr_number" },
+      { pr_number: "11", field: "pr_number" },
+      { checks: "quality: success", field: "checks" },
+      { checks: [123], field: "checks" },
+      { findings: {}, field: "findings" },
+      { risks: [true], field: "risks" },
+      { provider_history: "copilot", field: "provider_history" },
+    ];
+
+    for (const { field, ...body } of invalidCases) {
+      const res = mockRes();
+      await handler(req({ ...BASE, ...body, event_key: `e-struct-${field}-${Math.random()}` }), res);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toBe("invalid_notification");
+      expect(res.body.invalid).toContain(field);
+    }
+  });
+
+  it("accepts valid optional PR/SHA identity fields and string arrays", async () => {
+    const res = mockRes();
+    await handler(req({
+      ...BASE,
+      event_key: "e-valid-identity",
+      sha: "8fd4e86b0ca97f97bc1f66956debbb7b461947af",
+      pr_number: 11,
+      checks: ["quality: success"],
+      findings: [],
+      risks: [],
+      provider_history: ["copilot", "anthropic"],
+    }), res);
+    expect(res.statusCode).toBe(200);
+  });
   it("truncates only at complete rendered lines, preserving balanced Telegram markup", () => {
     const ev = sanitizeEvent({
       ...BASE,
