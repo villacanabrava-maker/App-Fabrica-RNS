@@ -39,6 +39,12 @@ const HUMAN_ACTION_LABELS = {
 };
 
 const PROVIDER_LABELS = { copilot: "Copilot", anthropic: "Anthropic", openai: "OpenAI", claude: "Claude", none: "nenhum" };
+const VALID_CATEGORIES = new Set(["INFO", "WORKING", "BLOCKED", "HUMAN_ACTION", "COMPLETED", "SECURITY"]);
+const VALID_ACTIONS = new Set(["NONE", "REVIEW", "APPROVE", "REJECT_OR_DECIDE", "RESTORE_PROVIDER", "CONFIGURE_SECRET", "INVESTIGATE"]);
+const VALID_SEVERITIES = new Set(["info", "low", "medium", "high", "critical"]);
+const VALID_PROVIDER_STATUS_KEYS = new Set(["watcher", "constructor", "constructor_owner", "automation", "constructor_copilot", "constructor_anthropic", "constructor_openai", "fiscal_openai", "reviewer_anthropic", "ci", "vercel"]);
+const VALID_PROVIDER_STATUS_VALUES = new Set(["HEALTHY", "WORKING", "DEGRADED", "UNAVAILABLE_CREDIT", "UNAVAILABLE_AUTH", "DISABLED_BY_POLICY", "CIRCUIT_OPEN", "UNKNOWN", "ENABLED", "DISABLED", "IDLE", "BLOCKED", "PENDING_RESPONSE", "UNAVAILABLE_ERROR"]);
+const VALID_PROVIDER_OWNERS = new Set(["copilot", "anthropic", "openai", "claude", "none"]);
 
 // Groups rendered separately in "Estado dos motores" (mirrors the human decision that Builder
 // engines, the Fiscal and the independent Reviewer are three distinct pools — never merge them
@@ -48,6 +54,29 @@ const BUILDER_LABELS = { constructor_copilot: "Copilot", constructor_anthropic: 
 
 function required(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeEnum(value, allowed, fallback) {
+  if (typeof value !== "string") return fallback;
+  const c = value.trim();
+  if (!c) return fallback;
+  const upper = c.toUpperCase();
+  if (allowed.has(upper)) return upper;
+  const lower = c.toLowerCase();
+  if (allowed.has(lower)) return lower;
+  return fallback;
+}
+
+function isAllowedHttpUrl(value) {
+  if (typeof value !== "string") return false;
+  const raw = value.trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(raw);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !/[\u0000-\u001F\u007F]/.test(raw);
+  } catch {
+    return false;
+  }
 }
 
 function clip(value, max = MAX_TEXT) {
@@ -116,10 +145,32 @@ function safeText(value, max) {
 // hurts legibility/audit fidelity for no security benefit (there is no HTML-rendering context
 // on that surface). Sanitized (redacted + length-capped) either way.
 function safeMarkdown(value, max) {
-  return clip(redact(value), max);
+  let out = String(value ?? "");
+  out = out.replace(/<script[\s\S]*?<\/script>/gi, " ");
+  out = out.replace(/<[^>]+>/g, " ");
+  out = out.replace(/!\[[^\]]*\]\((?:javascript:|data:)[^)]+\)/gi, " ");
+  out = out.replace(/\[([^\]]+)\]\((?:javascript:|data:)[^)]+\)/gi, "$1");
+  out = out.replace(/\s+/g, " ").trim();
+  return clip(redact(out), max);
 }
 
-function isPlainObject(v) { return v && typeof v === "object" && !Array.isArray(v); }
+function isPlainObject(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
+
+function normalizeProviderStatus(src) {
+  const out = Object.create(null);
+  if (!isPlainObject(src)) return out;
+  for (const [key, value] of Object.entries(src)) {
+    if (!VALID_PROVIDER_STATUS_KEYS.has(key)) continue;
+    if (key === "constructor_owner") {
+      const owner = String(value ?? "").trim().toLowerCase();
+      if (VALID_PROVIDER_OWNERS.has(owner)) out[key] = owner;
+      continue;
+    }
+    const normalized = normalizeEnum(value, VALID_PROVIDER_STATUS_VALUES, null);
+    if (normalized) out[key] = normalized;
+  }
+  return out;
+}
 
 function sanitizeStringArray(v, maxItems = 10, maxLen = 200) {
   if (!Array.isArray(v)) return [];
@@ -130,27 +181,57 @@ function sanitizeStringArray(v, maxItems = 10, maxLen = 200) {
 // else — never enters the event object at all, regardless of what a caller sent.
 function sanitizeEvent(body) {
   const src = body && typeof body === "object" ? body : {};
-  const out = {};
+  const out = Object.create(null);
   for (const key of ALLOWED_FIELDS) if (src[key] !== undefined && src[key] !== null) out[key] = src[key];
   if (!out.human_summary && src.summary) out.human_summary = src.summary; // v1 compatibility
 
   out.event_key = required(out.event_key);
   out.title = required(out.title);
   out.human_summary = required(out.human_summary);
-  out.category = required(out.category) || "INFO";
-  out.severity = required(out.severity) || (out.category === "BLOCKED" || out.category === "SECURITY" ? "critical" : "info");
-  out.human_action = required(out.human_action) || "NONE";
-  out.url = required(out.url);
-  out.details_url = required(out.details_url);
-  out.checks_url = required(out.checks_url);
+  const categoryInput = out.category;
+  const categoryNormalized = categoryInput === undefined || categoryInput === null ? "INFO" : normalizeEnum(categoryInput, VALID_CATEGORIES, null);
+  out.category = categoryNormalized || "INFO";
+  const severityInput = out.severity;
+  const severityNormalized = severityInput === undefined || severityInput === null ? (out.category === "BLOCKED" || out.category === "SECURITY" ? "critical" : "info") : normalizeEnum(severityInput, VALID_SEVERITIES, null);
+  out.severity = severityNormalized || (out.category === "BLOCKED" || out.category === "SECURITY" ? "critical" : "info");
+  const actionInput = out.human_action;
+  const actionNormalized = actionInput === undefined || actionInput === null ? "NONE" : normalizeEnum(actionInput, VALID_ACTIONS, null);
+  out.human_action = actionNormalized || "NONE";
+  out.url = isAllowedHttpUrl(out.url) ? out.url.trim() : null;
+  out.details_url = isAllowedHttpUrl(out.details_url) ? out.details_url.trim() : null;
+  out.checks_url = isAllowedHttpUrl(out.checks_url) ? out.checks_url.trim() : null;
   out.sha = /^[0-9a-f]{7,40}$/i.test(String(out.sha || "")) ? out.sha : null;
   out.pr_number = Number.isFinite(Number(out.pr_number)) && out.pr_number !== undefined ? Number(out.pr_number) : null;
-  out.provider_status = isPlainObject(out.provider_status) ? out.provider_status : {};
+  out.provider_status = normalizeProviderStatus(out.provider_status);
   out.provider_history = sanitizeStringArray(out.provider_history);
   out.checks = sanitizeStringArray(out.checks);
   out.findings = sanitizeStringArray(out.findings);
   out.risks = sanitizeStringArray(out.risks);
   return out;
+}
+
+function getInvalidStructurallyFields(raw) {
+  const invalid = [];
+  if (raw && typeof raw === "object") {
+    if (raw.category !== undefined && raw.category !== null && !VALID_CATEGORIES.has(String(raw.category).trim().toUpperCase())) invalid.push("category");
+    if (raw.human_action !== undefined && raw.human_action !== null && !VALID_ACTIONS.has(String(raw.human_action).trim().toUpperCase())) invalid.push("human_action");
+    if (raw.severity !== undefined && raw.severity !== null && !VALID_SEVERITIES.has(String(raw.severity).trim().toLowerCase())) invalid.push("severity");
+    if (raw.provider_status !== undefined && raw.provider_status !== null) {
+      for (const [key, value] of Object.entries(raw.provider_status)) {
+        if (!VALID_PROVIDER_STATUS_KEYS.has(key)) { invalid.push("provider_status"); break; }
+        if (key === "constructor_owner") {
+          if (!VALID_PROVIDER_OWNERS.has(String(value ?? "").trim().toLowerCase())) { invalid.push("provider_status"); break; }
+          continue;
+        }
+        if (!VALID_PROVIDER_STATUS_VALUES.has(String(value ?? "").trim())) { invalid.push("provider_status"); break; }
+      }
+    }
+    for (const key of ["url", "details_url", "checks_url"]) {
+      const val = raw[key];
+      if (val !== undefined && val !== null && !isAllowedHttpUrl(val)) invalid.push(key);
+    }
+  }
+  return [...new Set(invalid)];
 }
 
 function label(map, value) {
@@ -181,6 +262,16 @@ function buildFullSnapshotSection(ev) {
   return order
     .filter((k) => ev.provider_status[k] !== undefined)
     .map((k) => `${k}: ${ev.provider_status[k]}`);
+}
+
+function trimTelegramHtml(text, max = MAX_TEXT) {
+  if (text.length <= max) return text;
+  const footer = "\n\n(mensagem resumida — detalhes completos no GitHub)";
+  const available = max - footer.length;
+  let trimmed = text.slice(0, available).trimEnd();
+  trimmed = trimmed.replace(/<\/?[A-Za-z][^>]*$/, "");
+  trimmed = trimmed.replace(/&lt;[^&]*$/, "");
+  return trimmed + footer;
 }
 
 function buildTelegramText(ev) {
@@ -242,7 +333,9 @@ function buildTelegramText(ev) {
     const footer = ev.details_url
       ? `\n\n(mensagem resumida — <a href="${escapeHtml(ev.details_url)}">detalhes completos no GitHub</a>)`
       : "\n\n(mensagem resumida)";
-    text = text.slice(0, MAX_TEXT - footer.length) + footer;
+    text = text.slice(0, MAX_TEXT - footer.length).trimEnd();
+    text = text.replace(/<\/?[A-Za-z][^>]*$/, "");
+    text = text + footer;
   }
   return text;
 }
@@ -308,6 +401,11 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "unauthorized" });
   }
 
+  const invalid = getInvalidStructurallyFields(req.body || {});
+  if (invalid.length) {
+    return res.status(400).json({ error: "invalid_notification", invalid });
+  }
+
   const ev = sanitizeEvent(req.body || {});
   if (!ev.event_key || !ev.title || !ev.human_summary) {
     return res.status(400).json({ error: "invalid_notification" });
@@ -352,7 +450,6 @@ export default async function handler(req, res) {
       ok: true,
       event_key: ev.event_key,
       message_id: data?.result?.message_id || null,
-      chat_id: data?.result?.chat?.id || null,
     });
   } catch (error) {
     return res.status(502).json({ error: "notification_bridge_failure", event_key: ev.event_key, detail: error?.message || "unknown" });

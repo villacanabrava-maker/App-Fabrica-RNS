@@ -249,6 +249,52 @@ describe("wrong-secret", () => {
   });
 });
 
+describe("safe-schema-and-output", () => {
+  it("rejects invalid enums and unsafe URLs while keeping a valid payload", () => {
+    const ev = sanitizeEvent({
+      ...BASE,
+      event_key: "e-schema",
+      category: "HACKER",
+      severity: "urgent",
+      human_action: "EXECUTE",
+      url: "javascript:alert(1)",
+      details_url: "data:text/html,<script>alert(1)</script>",
+      checks_url: "ftp://example.com/ci",
+      provider_status: { constructor: "BAD_STATUS" },
+    });
+
+    expect(ev.category).toBe("INFO");
+    expect(ev.severity).toBe("info");
+    expect(ev.human_action).toBe("NONE");
+    expect(ev.url).toBeNull();
+    expect(ev.details_url).toBeNull();
+    expect(ev.checks_url).toBeNull();
+    expect(ev.provider_status.constructor).toBeUndefined();
+  });
+
+  it("returns 400 for invalid category, action, severity and provider_status schema", async () => {
+    const invalidCases = [
+      { category: "HACKER" },
+      { human_action: "EXECUTE" },
+      { severity: "urgent" },
+      { provider_status: { constructor: "BAD_STATUS" } },
+    ];
+
+    for (const body of invalidCases) {
+      const res = mockRes();
+      await handler(req({ ...BASE, ...body, event_key: `e-invalid-${Math.random().toString(16).slice(2)}` }), res);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toBe("invalid_notification");
+    }
+  });
+
+  it("drops chat_id from the successful send payload while preserving the message id", async () => {
+    const res = mockRes();
+    await handler(req({ ...BASE, event_key: "e-send-minified", cycle_id: "cycle-42", task_id: "task-7" }), res);
+    expect(res.body).not.toHaveProperty("chat_id");
+    expect(res.body).toHaveProperty("message_id");
+  });
+});
 describe("correct-secret-proceeds", () => {
   it("POST with the correct Authorization proceeds to send", async () => {
     const res = mockRes();
