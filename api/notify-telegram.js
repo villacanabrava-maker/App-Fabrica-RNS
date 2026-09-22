@@ -62,11 +62,17 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;");
 }
 
-// Layer 3: redact known-secret SHAPES, not only known prefixes — a name=value pair for any
-// secret this project uses, bearer/authorization headers, common vendor token prefixes, and
-// (last resort, intentionally broad) any long unbroken base64/hex-looking run. Errs toward
-// over-redaction: a false positive just becomes "«redigido»", never a leaked secret.
-const SECRET_PATTERNS = [
+// Layer 3: redact known-secret SHAPES, not only known prefixes. Two tiers:
+//  - NAMED_SECRET_PATTERNS: specific shapes (name=value for a secret this project uses,
+//    Authorization/Bearer headers, vendor token prefixes) — always redacted, everywhere,
+//    including inside a URL's query string.
+//  - GENERIC_BLOB_RE: last-resort, intentionally broad catch for any long unbroken
+//    base64/hex-looking run — but a legitimate technical identifier must survive an audit
+//    trail, so it explicitly does NOT redact a bare 40-hex-char git SHA (a real secret is
+//    virtually never pure lowercase hex of exactly that length), and URLs are protected from
+//    it entirely (a long owner/repo/comment path is not a secret shape) while still being
+//    scanned by the named patterns above.
+const NAMED_SECRET_PATTERNS = [
   /\b(OPENAI_API_KEY|ANTHROPIC_API_KEY|FISCAL_BRIDGE_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|GITHUB_TOKEN|CODEX_API_KEY|SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_JWT_SECRET)\s*[=:]\s*\S+/gi,
   /\bAuthorization\s*:\s*.+$/gim, // consumes the whole header value (e.g. "Authorization: Bearer <token>"), not just its first word
   /\bBearer\s+[A-Za-z0-9._-]+/gi,
@@ -74,17 +80,43 @@ const SECRET_PATTERNS = [
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bsk-(proj-)?[A-Za-z0-9_-]{16,}/gi,
   /\bAKIA[0-9A-Z]{16}\b/g,
-  /\b[A-Za-z0-9+/_-]{40,}={0,2}\b/g, // generic long token/blob (also catches a bare 40-hex sha; acceptable — sha travels in its own field, never inside free text here)
 ];
+const GENERIC_BLOB_RE = /\b[A-Za-z0-9+/_-]{40,}={0,2}\b/g;
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/g;
+// Built at RUNTIME via String.fromCharCode (never a literal control byte in this source file,
+// so the file stays plain text/diffable — embedding a raw control byte here previously made
+// git treat this file as binary). A real control character essentially never appears in
+// legitimate free text, so it is a safe, collision-proof marker while URLs are protected from
+// GENERIC_BLOB_RE below.
+const PLACEHOLDER_CH = String.fromCharCode(1);
+const PLACEHOLDER_RESTORE_RE = new RegExp(`${PLACEHOLDER_CH}URL(\\d+)${PLACEHOLDER_CH}`, "g");
+
+function redactNamed(text) {
+  let out = text;
+  for (const re of NAMED_SECRET_PATTERNS) out = out.replace(re, "«redigido»");
+  return out;
+}
 
 function redact(text) {
   let out = String(text ?? "");
-  for (const re of SECRET_PATTERNS) out = out.replace(re, "«redigido»");
+  const urls = [];
+  out = out.replace(URL_RE, (m) => { urls.push(redactNamed(m)); return `${PLACEHOLDER_CH}URL${urls.length - 1}${PLACEHOLDER_CH}`; });
+  out = redactNamed(out);
+  out = out.replace(GENERIC_BLOB_RE, (m) => (/^[0-9a-f]{40}$/i.test(m) ? m : "«redigido»"));
+  out = out.replace(PLACEHOLDER_RESTORE_RE, (_, i) => urls[Number(i)]);
   return out;
 }
 
 function safeText(value, max) {
   return escapeHtml(clip(redact(value), max));
+}
+
+// Same secret redaction as safeText, but WITHOUT HTML-escaping: buildHumanStatusComment()
+// writes GitHub Markdown, not Telegram HTML — escaping "<"/">"/"&" there is unnecessary and
+// hurts legibility/audit fidelity for no security benefit (there is no HTML-rendering context
+// on that surface). Sanitized (redacted + length-capped) either way.
+function safeMarkdown(value, max) {
+  return clip(redact(value), max);
 }
 
 function isPlainObject(v) { return v && typeof v === "object" && !Array.isArray(v); }
@@ -222,9 +254,9 @@ export function buildHumanStatusComment(rawEvent) {
     "[RNS-HUMAN-STATUS]",
     `categoria=${ev.category} human_action=${ev.human_action}` + (ev.cycle_id ? ` cycle_id=${ev.cycle_id}` : "") + (ev.task_id ? ` task_id=${ev.task_id}` : "") + (ev.sha ? ` sha=${ev.sha}` : ""),
     "",
-    `## ${escapeHtml(clip(ev.title, 200))}`,
+    `## ${clip(ev.title, 200)}`,
     "",
-    safeText(ev.human_summary, 4000),
+    safeMarkdown(ev.human_summary, 4000),
     "",
     `VOCÊ PRECISA FAZER ALGO AGORA? ${ev.human_action === "NONE" ? "NÃO" : "SIM — " + (label(HUMAN_ACTION_LABELS, ev.human_action) || ev.human_action)}`,
   ];
@@ -232,31 +264,36 @@ export function buildHumanStatusComment(rawEvent) {
   const full = buildFullSnapshotSection(ev);
   if (full.length) lines.push("", "### Estado dos subsistemas", ...full.map((s) => `- ${s}`));
   if (ev.provider_history.length) lines.push("", `Histórico de providers: ${ev.provider_history.join(" -> ")}`);
-  if (ev.checks.length) lines.push("", "### Validações", ...ev.checks.map((c) => `- ${safeText(c, 300)}`));
-  if (ev.findings.length) lines.push("", "### Findings", ...ev.findings.map((f) => `- ${safeText(f, 400)}`));
-  if (ev.risks.length) lines.push("", "### Riscos conhecidos", ...ev.risks.map((r) => `- ${safeText(r, 300)}`));
-  if (ev.blocking_reason) lines.push("", `Bloqueio: ${safeText(ev.blocking_reason, 400)}`);
-  if (ev.technical_detail) lines.push("", `Detalhe técnico: ${safeText(ev.technical_detail, 400)}`);
-  if (ev.next_step) lines.push("", `Próximo passo: ${safeText(ev.next_step, 400)}`);
+  if (ev.checks.length) lines.push("", "### Validações", ...ev.checks.map((c) => `- ${safeMarkdown(c, 300)}`));
+  if (ev.findings.length) lines.push("", "### Findings", ...ev.findings.map((f) => `- ${safeMarkdown(f, 400)}`));
+  if (ev.risks.length) lines.push("", "### Riscos conhecidos", ...ev.risks.map((r) => `- ${safeMarkdown(r, 300)}`));
+  if (ev.blocking_reason) lines.push("", `Bloqueio: ${safeMarkdown(ev.blocking_reason, 400)}`);
+  if (ev.technical_detail) lines.push("", `Detalhe técnico: ${safeMarkdown(ev.technical_detail, 400)}`);
+  if (ev.next_step) lines.push("", `Próximo passo: ${safeMarkdown(ev.next_step, 400)}`);
   if (ev.url) lines.push("", `PR: ${ev.url}`);
   return lines.join("\n");
 }
 
-export { sanitizeEvent, buildTelegramText, redact };
+export { sanitizeEvent, buildTelegramText, redact, safeMarkdown };
 
 // Best-effort, in-memory only (per warm container; resets on cold start). NOT persistence —
 // nothing is written to any store. Smooths bursts of the same event_key arriving in a short
 // window from GitHub Actions (adjustment #1: no new persistence for batching/dedupe in V2).
 // Real, durable dedupe for local-orchestrator-originated events lives in notify.ps1's own
 // notify-state.json on the caller side.
+//
+// Dedupe means DELIVERED, not merely ATTEMPTED: seenRecently() only checks membership;
+// markDelivered() is called only after Telegram has confirmed success. A failed/errored send
+// must be retryable on the next identical event_key, not silently swallowed as "deduped".
 const recentEventKeys = new Map();
 const DEDUPE_TTL_MS = 10 * 60 * 1000;
 function seenRecently(key) {
   const now = Date.now();
   for (const [k, t] of recentEventKeys) if (now - t > DEDUPE_TTL_MS) recentEventKeys.delete(k);
-  if (recentEventKeys.has(key)) return true;
-  recentEventKeys.set(key, now);
-  return false;
+  return recentEventKeys.has(key);
+}
+function markDelivered(key) {
+  recentEventKeys.set(key, Date.now());
 }
 
 export default async function handler(req, res) {
@@ -306,9 +343,11 @@ export default async function handler(req, res) {
 
     const data = await upstream.json();
     if (!upstream.ok || !data?.ok) {
+      // Not delivered: do NOT mark dedupe. The same event_key must be retryable.
       return res.status(502).json({ error: "telegram_send_failed", event_key: ev.event_key, status: upstream.status });
     }
 
+    markDelivered(ev.event_key); // only now — confirmed delivered
     return res.status(200).json({
       ok: true,
       event_key: ev.event_key,

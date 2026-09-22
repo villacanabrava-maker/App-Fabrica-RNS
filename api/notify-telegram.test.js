@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import handler, { buildHumanStatusComment, buildTelegramText, redact, sanitizeEvent } from "./notify-telegram.js";
+import handler, { buildHumanStatusComment, buildTelegramText, redact, safeMarkdown, sanitizeEvent } from "./notify-telegram.js";
 
 function mockRes() {
   const res = { statusCode: 0, body: null, headers: {} };
@@ -210,10 +210,140 @@ describe("in-process dedupe (best-effort, non-persistent)", () => {
   });
 });
 
-describe("unauthorized", () => {
-  it("rejects without the bridge secret", async () => {
+describe("method-not-allowed", () => {
+  it("GET -> 405, Allow: POST, never touches auth/body", async () => {
+    const res = mockRes();
+    await handler({ method: "GET", headers: {} }, res);
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toEqual({ error: "method_not_allowed" });
+    expect(res.headers.Allow).toBe("POST");
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("unauthorized-post", () => {
+  it("POST with no Authorization header at all -> 401", async () => {
+    const res = mockRes();
+    await handler({ method: "POST", headers: {}, body: { ...BASE, event_key: "e-noauthheader" } }, res);
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual({ error: "unauthorized" });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("wrong-secret", () => {
+  it("POST with an incorrect Authorization -> 401", async () => {
     const res = mockRes();
     await handler(req({ ...BASE, event_key: "e-unauth" }, { auth: "Bearer wrong" }), res);
     expect(res.statusCode).toBe(401);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("correct-secret-proceeds", () => {
+  it("POST with the correct Authorization proceeds to send", async () => {
+    const res = mockRes();
+    await handler(req({ ...BASE, event_key: "e-correct-auth" }), res);
+    expect(res.statusCode).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("failed-send-does-not-dedupe", () => {
+  it("an upstream failure is retryable — the same event_key must be attempted again", async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 502, json: async () => ({ ok: false }) }));
+    const res1 = mockRes();
+    await handler(req({ ...BASE, event_key: "e-retry-1" }), res1);
+    expect(res1.statusCode).toBe(502);
+    expect(res1.body.event_key).toBe("e-retry-1");
+    expect(res1.body.deduped).toBeUndefined();
+
+    // Same event_key again: must NOT be short-circuited as already-delivered — fetch is called again.
+    const res2 = mockRes();
+    await handler(req({ ...BASE, event_key: "e-retry-1" }), res2);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(res2.body.deduped).toBeUndefined();
+  });
+
+  it("a thrown network error is also retryable", async () => {
+    global.fetch = vi.fn(async () => { throw new Error("ECONNRESET"); });
+    const res1 = mockRes();
+    await handler(req({ ...BASE, event_key: "e-retry-2" }), res1);
+    expect(res1.statusCode).toBe(502);
+    const res2 = mockRes();
+    await handler(req({ ...BASE, event_key: "e-retry-2" }), res2);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("successful-send-does-dedupe", () => {
+  it("only a CONFIRMED delivery (Telegram ok:true) marks the event_key as delivered", async () => {
+    const res1 = mockRes();
+    await handler(req({ ...BASE, event_key: "e-delivered-1" }), res1);
+    expect(res1.statusCode).toBe(200);
+    expect(res1.body.deduped).toBeUndefined();
+
+    const res2 = mockRes();
+    await handler(req({ ...BASE, event_key: "e-delivered-1" }), res2);
+    expect(global.fetch).toHaveBeenCalledTimes(1); // second call short-circuited
+    expect(res2.body.deduped).toBe(true);
+  });
+});
+
+describe("legitimate-sha-not-redacted", () => {
+  const sha40 = "72035873eb6bff3c64447ab1829fe0e256e08145";
+  it("a bare 40-hex git SHA survives redact() even embedded in free text", () => {
+    expect(redact(`corrigido no commit ${sha40} conforme o plano`)).toContain(sha40);
+  });
+  it("the structured sha field is never redacted in either surface", () => {
+    const ev = sanitizeEvent({ ...BASE, event_key: "e-sha", sha: sha40, findings: [`veja o commit ${sha40}`] });
+    const telegram = buildTelegramText(ev);
+    const comment = buildHumanStatusComment(ev);
+    expect(telegram).toContain(sha40.slice(0, 7)); // Telegram shows the short form
+    expect(comment).toContain(`sha=${sha40}`); // GitHub report keeps the full sha
+    expect(comment).toContain(sha40); // and the sha inside the finding text survives too
+  });
+});
+
+describe("github-url-not-redacted", () => {
+  const ghUrl = "https://github.com/villacanabrava-maker/App-Fabrica-RNS/pull/5#issuecomment-5769269395";
+  const vercelUrl = "https://fabricarns-app-git-feat-sprint-1-2-auth-shell-villacanabrava.vercel.app/api/health";
+  it("a full GitHub URL embedded in free text is not mangled by the generic blob pattern", () => {
+    expect(redact(`ver detalhes em ${ghUrl}`)).toContain(ghUrl);
+  });
+  it("a full Vercel deployment URL embedded in free text is not mangled either", () => {
+    expect(redact(`deploy em ${vercelUrl}`)).toContain(vercelUrl);
+  });
+  it("request_id/cycle_id/comment_id-shaped tokens survive redact()", () => {
+    const requestId = "fiscal_26ccb7249f3ffc13686a8639";
+    const cycleId = "c20260921205802-7203587";
+    const commentId = "5769269395";
+    const text = `request_id=${requestId} cycle_id=${cycleId} comment_id=${commentId}`;
+    const out = redact(text);
+    expect(out).toContain(requestId);
+    expect(out).toContain(cycleId);
+    expect(out).toContain(commentId);
+  });
+  it("a token embedded INSIDE a URL query string is still redacted (named patterns still apply)", () => {
+    const withToken = "https://example.invalid/callback?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234";
+    const out = redact(withToken);
+    expect(out).toContain("«redigido»");
+    expect(out).not.toContain("ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234");
+  });
+});
+
+describe("telegram-html-vs-github-markdown", () => {
+  it("buildTelegramText HTML-escapes; buildHumanStatusComment does not (Markdown, not HTML)", () => {
+    const ev = sanitizeEvent({ ...BASE, event_key: "e-md", human_summary: "Use `code` e o operador a < b para comparar." });
+    const telegram = buildTelegramText(ev);
+    const comment = buildHumanStatusComment(ev);
+    expect(telegram).toContain("a &lt; b");
+    expect(comment).toContain("a < b"); // not HTML-escaped — this is a Markdown surface
+    expect(comment).toContain("`code`"); // backticks preserved for legibility
+  });
+  it("safeMarkdown still redacts secrets without HTML-escaping", () => {
+    const out = safeMarkdown("token FISCAL_BRIDGE_SECRET=FakeSecretValue1234567890 e a < b", 200);
+    expect(out).toContain("«redigido»");
+    expect(out).toContain("a < b");
   });
 });
