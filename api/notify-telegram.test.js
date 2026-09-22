@@ -160,6 +160,15 @@ describe("html-injection", () => {
   });
 });
 
+describe("markdown-script-tag-whitespace", () => {
+  it("removes script blocks even when the closing tag contains whitespace before >", () => {
+    const out = safeMarkdown("<script>alert(1)</script > hello");
+    expect(out).not.toContain("alert(1)");
+    expect(out).not.toMatch(/<script/i);
+    expect(out).toContain("hello");
+  });
+});
+
 describe("secret-redaction", () => {
   const fakes = {
     OPENAI_API_KEY: fake("OPENAI_API_KEY=sk-FAKEsk-", "FAKE1234567890abcdEFGH"),

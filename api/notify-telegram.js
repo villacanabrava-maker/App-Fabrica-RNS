@@ -144,9 +144,49 @@ function safeText(value, max) {
 // writes GitHub Markdown, not Telegram HTML — escaping "<"/">"/"&" there is unnecessary and
 // hurts legibility/audit fidelity for no security benefit (there is no HTML-rendering context
 // on that surface). Sanitized (redacted + length-capped) either way.
-function safeMarkdown(value, max) {
+function stripScriptBlocks(value) {
   let out = String(value ?? "");
-  out = out.replace(/<script[\s\S]*?<\/script>/gi, " ");
+  let result = "";
+  let cursor = 0;
+
+  while (cursor < out.length) {
+    const openIndex = out.indexOf("<", cursor);
+    if (openIndex === -1) {
+      result += out.slice(cursor);
+      break;
+    }
+
+    result += out.slice(cursor, openIndex);
+    const closeIndex = out.indexOf(">", openIndex + 1);
+    if (closeIndex === -1) {
+      result += out.slice(openIndex);
+      break;
+    }
+
+    const tagText = out.slice(openIndex + 1, closeIndex).trim();
+    const tagName = tagText.match(/^\/?\s*([a-zA-Z0-9]+)/)?.[1]?.toLowerCase();
+
+    if (tagName === "script") {
+      const closingTagStart = out.toLowerCase().indexOf("</script", openIndex + 1);
+      if (closingTagStart !== -1) {
+        const closingTagEnd = out.indexOf(">", closingTagStart + 9);
+        const closingTag = closingTagEnd !== -1 ? out.slice(closingTagStart, closingTagEnd + 1) : "";
+        if (closingTag && /^<\/\s*script\b/i.test(closingTag)) {
+          cursor = closingTagEnd !== -1 ? closingTagEnd + 1 : out.length;
+          continue;
+        }
+      }
+    }
+
+    result += out.slice(openIndex, closeIndex + 1);
+    cursor = closeIndex + 1;
+  }
+
+  return result;
+}
+
+function safeMarkdown(value, max) {
+  let out = stripScriptBlocks(value);
   out = out.replace(/<[^>]+>/g, " ");
   out = out.replace(/!\[[^\]]*\]\((?:javascript:|data:)[^)]+\)/gi, " ");
   out = out.replace(/\[([^\]]+)\]\((?:javascript:|data:)[^)]+\)/gi, "$1");
