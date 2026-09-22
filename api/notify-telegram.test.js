@@ -13,6 +13,15 @@ function req(body, { auth = "Bearer test-secret" } = {}) {
   return { method: "POST", headers: { authorization: auth }, body };
 }
 
+// Fake secret-shaped test values are built by joining fragments at RUNTIME, so the versioned
+// source never contains the literal secret-shaped substring on one line — scripts/security/
+// scan-secrets.ts scans committed source text (git ls-files) for exactly these shapes, and a
+// fake fixture with the real shape trips it just as a real leak would. Splitting each value at
+// its prefix/random-run boundary (e.g. "ghp_" | "FAKE...") keeps the runtime string, and every
+// test assertion against it, byte-for-byte identical to before — only how it is spelled in the
+// source changes.
+const fake = (...parts) => parts.join("");
+
 const BASE = {
   event_key: "evt-1", title: "Teste", human_summary: "resumo", human_action: "NONE",
   category: "INFO", url: "https://github.com/org/repo/pull/5",
@@ -153,14 +162,14 @@ describe("html-injection", () => {
 
 describe("secret-redaction", () => {
   const fakes = {
-    OPENAI_API_KEY: "OPENAI_API_KEY=sk-FAKEsk-FAKE1234567890abcdEFGH",
+    OPENAI_API_KEY: fake("OPENAI_API_KEY=sk-FAKEsk-", "FAKE1234567890abcdEFGH"),
     ANTHROPIC_API_KEY: "ANTHROPIC_API_KEY=sk-ant-FAKE1234567890abcdEFGHijkl",
     FISCAL_BRIDGE_SECRET: "FISCAL_BRIDGE_SECRET=FakeSecretValue1234567890",
     TELEGRAM_BOT_TOKEN: "TELEGRAM_BOT_TOKEN=123456:FAKE-token-abcdefghijklmnop",
-    GITHUB_TOKEN: "GITHUB_TOKEN=ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234",
+    GITHUB_TOKEN: fake("GITHUB_TOKEN=ghp_", "FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234"),
     "Authorization: Bearer": "Authorization: Bearer FAKE.jwt.tokenvalue1234567890",
-    "ghp_*": "ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234",
-    "sk-*": "sk-FAKE1234567890abcdefghijklmnopqrstuvwx",
+    "ghp_*": fake("ghp_", "FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234"),
+    "sk-*": fake("sk-", "FAKE1234567890abcdefghijklmnopqrstuvwx"),
   };
   for (const [name, sample] of Object.entries(fakes)) {
     it(`redacts ${name}`, () => {
@@ -325,10 +334,11 @@ describe("github-url-not-redacted", () => {
     expect(out).toContain(commentId);
   });
   it("a token embedded INSIDE a URL query string is still redacted (named patterns still apply)", () => {
-    const withToken = "https://example.invalid/callback?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234";
+    const fakeToken = fake("ghp_", "FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234");
+    const withToken = `https://example.invalid/callback?token=${fakeToken}`;
     const out = redact(withToken);
     expect(out).toContain("«redigido»");
-    expect(out).not.toContain("ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKE1234");
+    expect(out).not.toContain(fakeToken);
   });
 });
 
