@@ -492,7 +492,7 @@ describe("security-hardening-regressions", () => {
     await handler(req({ ...BASE, event_key: "e-uppercase-url", url: good }), resGood);
     expect(resGood.statusCode).toBe(200);
 
-    const bad = "https://github.com/villacanabrava-maker/App-Fabrica-RNS/pull/11\u0001";
+    const bad = "https://github.com/villacanabrava-maker/App-Fabrica-RNS/pull/11" + String.fromCharCode(1);
     const resBad = mockRes();
     await handler(req({ ...BASE, event_key: "e-control-url", url: bad }), resBad);
     expect(resBad.statusCode).toBe(400);
