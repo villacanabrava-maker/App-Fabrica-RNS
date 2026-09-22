@@ -67,16 +67,23 @@ function normalizeEnum(value, allowed, fallback) {
   return fallback;
 }
 
-function isAllowedHttpUrl(value) {
-  if (typeof value !== "string") return false;
+function normalizeHttpUrl(value) {
+  if (typeof value !== "string") return null;
   const raw = value.trim();
-  if (!raw) return false;
+  if (!raw || /[\u0000-\u001F\u007F]/.test(raw)) return null;
   try {
     const parsed = new URL(raw);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !/[\u0000-\u001F\u007F]/.test(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (parsed.username || parsed.password) return null;
+    const canonical = parsed.href;
+    return canonical.length <= 2048 ? canonical : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isAllowedHttpUrl(value) {
+  return normalizeHttpUrl(value) !== null;
 }
 
 function clip(value, max = MAX_TEXT) {
@@ -89,6 +96,17 @@ function escapeHtml(value) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function escapeHtmlAttribute(value) {
+  return escapeHtml(value)
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function safeCanonicalUrl(value) {
+  const redacted = redact(value);
+  return normalizeHttpUrl(redacted);
 }
 
 // Layer 3: redact known-secret SHAPES, not only known prefixes. Two tiers:
@@ -237,9 +255,9 @@ function sanitizeEvent(body) {
   const actionInput = out.human_action;
   const actionNormalized = actionInput === undefined || actionInput === null ? "NONE" : normalizeEnum(actionInput, VALID_ACTIONS, null);
   out.human_action = actionNormalized || "NONE";
-  out.url = isAllowedHttpUrl(out.url) ? out.url.trim() : null;
-  out.details_url = isAllowedHttpUrl(out.details_url) ? out.details_url.trim() : null;
-  out.checks_url = isAllowedHttpUrl(out.checks_url) ? out.checks_url.trim() : null;
+  out.url = normalizeHttpUrl(out.url);
+  out.details_url = normalizeHttpUrl(out.details_url);
+  out.checks_url = normalizeHttpUrl(out.checks_url);
   out.sha = /^[0-9a-f]{7,40}$/i.test(String(out.sha || "")) ? out.sha : null;
   out.pr_number = Number.isFinite(Number(out.pr_number)) && out.pr_number !== undefined ? Number(out.pr_number) : null;
   out.provider_status = normalizeProviderStatus(out.provider_status);
@@ -256,14 +274,18 @@ function getInvalidStructurallyFields(raw) {
     if (raw.category !== undefined && raw.category !== null && !VALID_CATEGORIES.has(String(raw.category).trim().toUpperCase())) invalid.push("category");
     if (raw.human_action !== undefined && raw.human_action !== null && !VALID_ACTIONS.has(String(raw.human_action).trim().toUpperCase())) invalid.push("human_action");
     if (raw.severity !== undefined && raw.severity !== null && !VALID_SEVERITIES.has(String(raw.severity).trim().toLowerCase())) invalid.push("severity");
-    if (raw.provider_status !== undefined && raw.provider_status !== null) {
-      for (const [key, value] of Object.entries(raw.provider_status)) {
-        if (!VALID_PROVIDER_STATUS_KEYS.has(key)) { invalid.push("provider_status"); break; }
-        if (key === "constructor_owner") {
-          if (!VALID_PROVIDER_OWNERS.has(String(value ?? "").trim().toLowerCase())) { invalid.push("provider_status"); break; }
-          continue;
+    if (raw.provider_status !== undefined) {
+      if (!isPlainObject(raw.provider_status)) {
+        invalid.push("provider_status");
+      } else {
+        for (const [key, value] of Object.entries(raw.provider_status)) {
+          if (!VALID_PROVIDER_STATUS_KEYS.has(key)) { invalid.push("provider_status"); break; }
+          if (key === "constructor_owner") {
+            if (!VALID_PROVIDER_OWNERS.has(String(value ?? "").trim().toLowerCase())) { invalid.push("provider_status"); break; }
+            continue;
+          }
+          if (!VALID_PROVIDER_STATUS_VALUES.has(String(value ?? "").trim())) { invalid.push("provider_status"); break; }
         }
-        if (!VALID_PROVIDER_STATUS_VALUES.has(String(value ?? "").trim())) { invalid.push("provider_status"); break; }
       }
     }
     for (const key of ["url", "details_url", "checks_url"]) {
@@ -304,14 +326,25 @@ function buildFullSnapshotSection(ev) {
     .map((k) => `${k}: ${ev.provider_status[k]}`);
 }
 
-function trimTelegramHtml(text, max = MAX_TEXT) {
-  if (text.length <= max) return text;
-  const footer = "\n\n(mensagem resumida — detalhes completos no GitHub)";
-  const available = max - footer.length;
-  let trimmed = text.slice(0, available).trimEnd();
-  trimmed = trimmed.replace(/<\/?[A-Za-z][^>]*$/, "");
-  trimmed = trimmed.replace(/&lt;[^&]*$/, "");
-  return trimmed + footer;
+function fitTelegramHtmlLines(lines, footerLines = []) {
+  const normalized = lines.filter((line) => line !== null && line !== undefined);
+  const full = normalized.join("\n");
+  if (full.length <= MAX_TEXT) return full;
+
+  const footer = footerLines.filter(Boolean);
+  const footerText = footer.length ? "\n" + footer.join("\n") : "";
+  const budget = Math.max(0, MAX_TEXT - footerText.length);
+  const kept = [];
+  let used = 0;
+
+  for (const line of normalized) {
+    const addition = (kept.length ? 1 : 0) + line.length;
+    if (used + addition > budget) break;
+    kept.push(line);
+    used += addition;
+  }
+
+  return kept.join("\n") + footerText;
 }
 
 function buildTelegramText(ev) {
@@ -362,22 +395,19 @@ function buildTelegramText(ev) {
   ];
 
   const links = [];
-  if (ev.url) links.push(`<a href="${escapeHtml(ev.url)}">Abrir PR</a>`);
-  if (ev.checks_url) links.push(`<a href="${escapeHtml(ev.checks_url)}">Ver CI</a>`);
-  if (ev.details_url) links.push(`<a href="${escapeHtml(ev.details_url)}">Ver detalhes</a>`);
+  const prUrl = safeCanonicalUrl(ev.url);
+  const checksUrl = safeCanonicalUrl(ev.checks_url);
+  const detailsUrl = safeCanonicalUrl(ev.details_url);
+  if (prUrl) links.push(`<a href="${escapeHtmlAttribute(prUrl)}">Abrir PR</a>`);
+  if (checksUrl) links.push(`<a href="${escapeHtmlAttribute(checksUrl)}">Ver CI</a>`);
+  if (detailsUrl) links.push(`<a href="${escapeHtmlAttribute(detailsUrl)}">Ver detalhes</a>`);
   if (links.length) body.push(links.join(" · "));
-  body.push("", `<code>${escapeHtml(ev.event_key)}</code>`);
+  body.push("", `<code>${safeText(ev.event_key, 240)}</code>`);
 
-  let text = body.filter((l) => l !== null && l !== undefined).join("\n");
-  if (text.length > MAX_TEXT) {
-    const footer = ev.details_url
-      ? `\n\n(mensagem resumida — <a href="${escapeHtml(ev.details_url)}">detalhes completos no GitHub</a>)`
-      : "\n\n(mensagem resumida)";
-    text = text.slice(0, MAX_TEXT - footer.length).trimEnd();
-    text = text.replace(/<\/?[A-Za-z][^>]*$/, "");
-    text = text + footer;
-  }
-  return text;
+  const footer = detailsUrl
+    ? ["", `(mensagem resumida — <a href="${escapeHtmlAttribute(detailsUrl)}">detalhes completos no GitHub</a>)`]
+    : ["", "(mensagem resumida)"];
+  return fitTelegramHtmlLines(body, footer);
 }
 
 // Exported for the GitHub "[RNS-HUMAN-STATUS]" comment body (technical, no length pressure).
@@ -385,9 +415,9 @@ export function buildHumanStatusComment(rawEvent) {
   const ev = sanitizeEvent(rawEvent);
   const lines = [
     "[RNS-HUMAN-STATUS]",
-    `categoria=${ev.category} human_action=${ev.human_action}` + (ev.cycle_id ? ` cycle_id=${ev.cycle_id}` : "") + (ev.task_id ? ` task_id=${ev.task_id}` : "") + (ev.sha ? ` sha=${ev.sha}` : ""),
+    `categoria=${ev.category} human_action=${ev.human_action}` + (ev.cycle_id ? ` cycle_id=${safeMarkdown(ev.cycle_id, 160)}` : "") + (ev.task_id ? ` task_id=${safeMarkdown(ev.task_id, 160)}` : "") + (ev.sha ? ` sha=${ev.sha}` : ""),
     "",
-    `## ${clip(ev.title, 200)}`,
+    `## ${safeMarkdown(ev.title, 200)}`,
     "",
     safeMarkdown(ev.human_summary, 4000),
     "",
@@ -396,14 +426,15 @@ export function buildHumanStatusComment(rawEvent) {
   if (ev.human_action === "APPROVE") lines.push("", "A Fábrica NÃO fará merge automaticamente.");
   const full = buildFullSnapshotSection(ev);
   if (full.length) lines.push("", "### Estado dos subsistemas", ...full.map((s) => `- ${s}`));
-  if (ev.provider_history.length) lines.push("", `Histórico de providers: ${ev.provider_history.join(" -> ")}`);
+  if (ev.provider_history.length) lines.push("", `Histórico de providers: ${ev.provider_history.map((v) => safeMarkdown(v, 120)).join(" -> ")}`);
   if (ev.checks.length) lines.push("", "### Validações", ...ev.checks.map((c) => `- ${safeMarkdown(c, 300)}`));
   if (ev.findings.length) lines.push("", "### Findings", ...ev.findings.map((f) => `- ${safeMarkdown(f, 400)}`));
   if (ev.risks.length) lines.push("", "### Riscos conhecidos", ...ev.risks.map((r) => `- ${safeMarkdown(r, 300)}`));
   if (ev.blocking_reason) lines.push("", `Bloqueio: ${safeMarkdown(ev.blocking_reason, 400)}`);
   if (ev.technical_detail) lines.push("", `Detalhe técnico: ${safeMarkdown(ev.technical_detail, 400)}`);
   if (ev.next_step) lines.push("", `Próximo passo: ${safeMarkdown(ev.next_step, 400)}`);
-  if (ev.url) lines.push("", `PR: ${ev.url}`);
+  const humanUrl = safeCanonicalUrl(ev.url);
+  if (humanUrl) lines.push("", `PR: ${safeMarkdown(humanUrl, 2200)}`);
   return lines.join("\n");
 }
 
@@ -451,8 +482,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "invalid_notification" });
   }
 
+  const externalEventKey = clip(redact(ev.event_key), 240);
   if (seenRecently(ev.event_key)) {
-    return res.status(200).json({ ok: true, event_key: ev.event_key, deduped: true });
+    return res.status(200).json({ ok: true, event_key: externalEventKey, deduped: true });
   }
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -460,7 +492,7 @@ export default async function handler(req, res) {
   if (!token || !chatId) {
     return res.status(503).json({
       error: "telegram_not_configured",
-      event_key: ev.event_key,
+      event_key: externalEventKey,
       missing: [!token && "TELEGRAM_BOT_TOKEN", !chatId && "TELEGRAM_CHAT_ID"].filter(Boolean),
     });
   }
@@ -482,16 +514,16 @@ export default async function handler(req, res) {
     const data = await upstream.json();
     if (!upstream.ok || !data?.ok) {
       // Not delivered: do NOT mark dedupe. The same event_key must be retryable.
-      return res.status(502).json({ error: "telegram_send_failed", event_key: ev.event_key, status: upstream.status });
+      return res.status(502).json({ error: "telegram_send_failed", event_key: externalEventKey, status: upstream.status });
     }
 
     markDelivered(ev.event_key); // only now — confirmed delivered
     return res.status(200).json({
       ok: true,
-      event_key: ev.event_key,
+      event_key: externalEventKey,
       message_id: data?.result?.message_id || null,
     });
-  } catch (error) {
-    return res.status(502).json({ error: "notification_bridge_failure", event_key: ev.event_key, detail: error?.message || "unknown" });
+  } catch {
+    return res.status(502).json({ error: "notification_bridge_failure", event_key: externalEventKey, detail: "upstream_request_failed" });
   }
 }
