@@ -412,3 +412,90 @@ describe("telegram-html-vs-github-markdown", () => {
     expect(out).toContain("a < b");
   });
 });
+
+
+describe("security-hardening-regressions", () => {
+  it("redacts sensitive values on Telegram and GitHub metadata/output surfaces", () => {
+    const secret = "GITHUB_TOKEN=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234";
+    const ev = sanitizeEvent({
+      ...BASE,
+      event_key: `event-${secret}`,
+      title: `title ${secret}`,
+      cycle_id: `cycle-${secret}`,
+      task_id: `task-${secret}`,
+      provider_history: [`copilot-${secret}`, "anthropic"],
+      url: `https://github.com/example/repo/pull/1?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234`,
+      details_url: `https://github.com/example/repo/issues/1?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234`,
+      checks_url: `https://github.com/example/repo/actions?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234`,
+    });
+    const telegram = buildTelegramText(ev);
+    const github = buildHumanStatusComment(ev);
+    expect(telegram).not.toContain("ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234");
+    expect(github).not.toContain("ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234");
+    expect(telegram).toContain("«redigido»");
+    expect(github).toContain("«redigido»");
+  });
+
+  it("rejects embedded URL credentials and canonicalizes safe URLs", () => {
+    expect(sanitizeEvent({ ...BASE, url: "https://user:pass@example.com/path" }).url).toBeNull();
+    expect(sanitizeEvent({ ...BASE, url: "javascript:alert(1)" }).url).toBeNull();
+    expect(sanitizeEvent({ ...BASE, url: "data:text/html,hi" }).url).toBeNull();
+    expect(sanitizeEvent({ ...BASE, url: "https://example.com/a b" }).url).toBe("https://example.com/a%20b");
+  });
+
+  it("escapes quotes in href attributes", () => {
+    const ev = sanitizeEvent({
+      ...BASE,
+      url: "https://example.com/?q=%22hello%22",
+      details_url: "https://example.com/details?q=%27x%27",
+    });
+    const text = buildTelegramText(ev);
+    expect(text).toContain("href=");
+    expect(text).not.toContain('href="https://example.com/?q="hello""');
+  });
+
+  it("rejects provider_status values that are not plain objects", async () => {
+    for (const value of [[], "x", 123, true, null]) {
+      const res = mockRes();
+      await handler(req({ ...BASE, event_key: `e-provider-${String(value)}-${Math.random()}`, provider_status: value }), res);
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toBe("invalid_notification");
+      expect(res.body.invalid).toContain("provider_status");
+    }
+  });
+
+  it("allows an empty provider_status object", async () => {
+    const res = mockRes();
+    await handler(req({ ...BASE, event_key: "e-provider-empty", provider_status: {} }), res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("never returns a raw upstream error message", async () => {
+    global.fetch = vi.fn(async () => {
+      throw new Error("request failed https://api.telegram.org/botSECRET_TOKEN/sendMessage");
+    });
+    const res = mockRes();
+    await handler(req({ ...BASE, event_key: "e-safe-error" }), res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body.detail).toBe("upstream_request_failed");
+    expect(JSON.stringify(res.body)).not.toContain("SECRET_TOKEN");
+  });
+
+  it("truncates only at complete rendered lines, preserving balanced Telegram markup", () => {
+    const ev = sanitizeEvent({
+      ...BASE,
+      event_key: "e-safe-truncate",
+      title: "T".repeat(300),
+      human_summary: "A & B ".repeat(900),
+      checks: Array.from({ length: 10 }, (_, i) => `check-${i}-${"x".repeat(180)}`),
+      findings: Array.from({ length: 10 }, (_, i) => `finding-${i}-${"y".repeat(180)}`),
+      details_url: "https://github.com/example/repo/pull/1#details",
+    });
+    const text = buildTelegramText(ev);
+    expect(text.length).toBeLessThanOrEqual(3500);
+    expect((text.match(/<b>/g) || []).length).toBe((text.match(/<\/b>/g) || []).length);
+    expect((text.match(/<code>/g) || []).length).toBe((text.match(/<\/code>/g) || []).length);
+    expect(text).not.toMatch(/&(?:amp|lt|gt|quot|#39)?$/);
+    expect(text).not.toMatch(/<a\b[^>]*$/);
+  });
+});
