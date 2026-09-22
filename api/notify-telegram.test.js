@@ -416,7 +416,8 @@ describe("telegram-html-vs-github-markdown", () => {
 
 describe("security-hardening-regressions", () => {
   it("redacts sensitive values on Telegram and GitHub metadata/output surfaces", () => {
-    const secret = "GITHUB_TOKEN=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234";
+    const fakeToken = fake("ghp_", "FAKEFAKEFAKEFAKEFAKEFAKE1234");
+    const secret = `GITHUB_TOKEN=${fakeToken}`;
     const ev = sanitizeEvent({
       ...BASE,
       event_key: `event-${secret}`,
@@ -424,14 +425,14 @@ describe("security-hardening-regressions", () => {
       cycle_id: `cycle-${secret}`,
       task_id: `task-${secret}`,
       provider_history: [`copilot-${secret}`, "anthropic"],
-      url: `https://github.com/example/repo/pull/1?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234`,
-      details_url: `https://github.com/example/repo/issues/1?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234`,
-      checks_url: `https://github.com/example/repo/actions?token=ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234`,
+      url: `https://github.com/example/repo/pull/1?token=${fakeToken}`,
+      details_url: `https://github.com/example/repo/issues/1?token=${fakeToken}`,
+      checks_url: `https://github.com/example/repo/actions?token=${fakeToken}`,
     });
     const telegram = buildTelegramText(ev);
     const github = buildHumanStatusComment(ev);
-    expect(telegram).not.toContain("ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234");
-    expect(github).not.toContain("ghp_FAKEFAKEFAKEFAKEFAKEFAKE1234");
+    expect(telegram).not.toContain(fakeToken);
+    expect(github).not.toContain(fakeToken);
     expect(telegram).toContain("«redigido»");
     expect(github).toContain("«redigido»");
   });
