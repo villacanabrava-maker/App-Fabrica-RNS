@@ -119,6 +119,33 @@ O arquivo `.github/workflows/human-notifications.yml` e deliberadamente limitado
 
 Essas invariantes sao verificadas por teste estatico versionado em `api/human-notifications.workflow.test.js`.
 
+## Aderencia canonica
+
+Esta V2 aplica as fontes normativas sem inventar autoridade nova:
+
+- **Constituicao, Art. 1 (Soberania humana):** Telegram e Human Status sao informativos; aprovacao/merge continuam como decisao humana autenticada.
+- **Constituicao, Art. 3 (Orquestracao deterministica):** somente o Orchestrator efetiva transicoes; o bridge apenas renderiza/notifica eventos recebidos.
+- **Constituicao, Art. 7 (Autor nao e juiz final):** a notificacao nao substitui revisao independente nem gates determinísticos.
+- **Definition of Done de tarefa:** testes de sucesso/falha, typecheck, lint, evidencia, revisao independente, findings bloqueantes resolvidos e CI verde continuam sendo requisitos; notificacao nao relaxa nenhum deles.
+- **Definition of Done de etapa:** aprovacao humana com `subject_sha` continua obrigatoria antes de merge.
+- **SECURITY.md — privilegio minimo:** o workflow declara apenas `contents: read` e `pull-requests: read`; nao possui write.
+- **SECURITY.md — codigo de PR nao confiavel:** embora o gatilho de notificacao de PR seja `pull_request_target`, o job nao faz checkout nem executa codigo da PR e ainda exige `head.repo.full_name == github.repository` antes de expor os secrets do bridge. Assim, o padrao perigoso documentado (secret + checkout/execucao de PR nao confiavel) nao existe neste workflow.
+- **SECURITY.md — validacao de saida:** o endpoint trata payload de caller como entrada nao confiavel e valida schema/semantica antes de renderizar.
+- **SECURITY.md — segredo:** tokens do Telegram e segredo do bridge ficam fora do codigo/comentarios e nunca sao enviados ao navegador.
+
+### Evidencia verificavel por SHA
+
+Para uma revisao Fiscal, as fontes que devem ser anexadas/consultadas no SHA exato sao:
+
+1. `api/notify-telegram.js` — implementacao completa do boundary;
+2. `api/notify-telegram.test.js` e `api/human-notifications.workflow.test.js` — regressao funcional/seguranca;
+3. `.github/workflows/human-notifications.yml` — gatilhos, permissoes, filtros e fail-open;
+4. este documento — contrato operacional, separacao Telegram HTML/GitHub Markdown e publisher local;
+5. as secoes normativas listadas acima na Constituicao, DoD e `SECURITY.md`;
+6. log do job `quality` do HEAD, comprovando execucao da suite `api/**/*.test.js`.
+
+Se qualquer uma dessas evidencias estiver omitida no bundle inline, isso e uma **lacuna de evidencia do bundle**, nao prova por si so um defeito de implementacao.
+
 ## Ativacao
 
 1. Merge humano da PR.
