@@ -258,8 +258,8 @@ function sanitizeEvent(body) {
   out.url = normalizeHttpUrl(out.url);
   out.details_url = normalizeHttpUrl(out.details_url);
   out.checks_url = normalizeHttpUrl(out.checks_url);
-  out.sha = /^[0-9a-f]{7,40}$/i.test(String(out.sha || "")) ? out.sha : null;
-  out.pr_number = Number.isFinite(Number(out.pr_number)) && out.pr_number !== undefined ? Number(out.pr_number) : null;
+  out.sha = typeof out.sha === "string" && /^[0-9a-f]{7,40}$/i.test(out.sha) ? out.sha : null;
+  out.pr_number = Number.isInteger(out.pr_number) && out.pr_number > 0 ? out.pr_number : null;
   out.provider_status = normalizeProviderStatus(out.provider_status);
   out.provider_history = sanitizeStringArray(out.provider_history);
   out.checks = sanitizeStringArray(out.checks);
@@ -291,6 +291,21 @@ function getInvalidStructurallyFields(raw) {
     for (const key of ["url", "details_url", "checks_url"]) {
       const val = raw[key];
       if (val !== undefined && val !== null && !isAllowedHttpUrl(val)) invalid.push(key);
+    }
+    if (raw.sha !== undefined && raw.sha !== null &&
+        (typeof raw.sha !== "string" || !/^[0-9a-f]{7,40}$/i.test(raw.sha))) {
+      invalid.push("sha");
+    }
+    if (raw.pr_number !== undefined && raw.pr_number !== null &&
+        (!Number.isInteger(raw.pr_number) || raw.pr_number <= 0)) {
+      invalid.push("pr_number");
+    }
+    for (const key of ["provider_history", "checks", "findings", "risks"]) {
+      const value = raw[key];
+      if (value !== undefined && value !== null &&
+          (!Array.isArray(value) || value.some((item) => typeof item !== "string"))) {
+        invalid.push(key);
+      }
     }
   }
   return [...new Set(invalid)];
