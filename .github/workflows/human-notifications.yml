@@ -28,8 +28,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          test -n "$BRIDGE_URL" || { echo "::error::FISCAL_BRIDGE_URL ausente"; exit 1; }
-          test -n "$BRIDGE_SECRET" || { echo "::error::FISCAL_BRIDGE_SECRET ausente"; exit 1; }
+          if [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_SECRET" ]; then
+            echo "::warning::Human notification skipped: FISCAL_BRIDGE_URL/FISCAL_BRIDGE_SECRET ausente"
+            exit 0
+          fi
 
           # human_action=REVIEW: revisar/aprovar uma PR e uma decisao que exige autoridade humana
           # (item 2 da politica); isto nao e um evento operacional de rotina.
@@ -47,11 +49,13 @@ jobs:
               next_step:"Abra a PR e revise quando conveniente; aprovacao e merge continuam exclusivamente humanos."}' \
             > payload.json
 
-          curl --fail-with-body --silent --show-error \
+          if ! curl --fail-with-body --silent --show-error \
             -X POST "$BRIDGE_URL/api/notify-telegram" \
             -H "Authorization: Bearer $BRIDGE_SECRET" \
             -H "Content-Type: application/json" \
-            --data-binary @payload.json
+            --data-binary @payload.json; then
+            echo "::warning::Human notification delivery failed; main workflow remains fail-open"
+          fi
 
   notify-workflow:
     if: github.event_name == 'workflow_run'
@@ -68,8 +72,10 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           URL: ${{ github.event.workflow_run.html_url }}
         run: |
-          test -n "$BRIDGE_URL" || { echo "::error::FISCAL_BRIDGE_URL ausente"; exit 1; }
-          test -n "$BRIDGE_SECRET" || { echo "::error::FISCAL_BRIDGE_SECRET ausente"; exit 1; }
+          if [ -z "$BRIDGE_URL" ] || [ -z "$BRIDGE_SECRET" ]; then
+            echo "::warning::Human notification skipped: FISCAL_BRIDGE_URL/FISCAL_BRIDGE_SECRET ausente"
+            exit 0
+          fi
 
           SHORT_SHA="$(printf '%s' "$SHA" | cut -c1-7)"
 
@@ -102,8 +108,10 @@ jobs:
               next_step:(if $conclusion == "success" then "Nenhuma acao; acompanhamento de rotina." else "Abra o workflow no GitHub e investigue a causa." end)}' \
             > payload.json
 
-          curl --fail-with-body --silent --show-error \
+          if ! curl --fail-with-body --silent --show-error \
             -X POST "$BRIDGE_URL/api/notify-telegram" \
             -H "Authorization: Bearer $BRIDGE_SECRET" \
             -H "Content-Type: application/json" \
-            --data-binary @payload.json
+            --data-binary @payload.json; then
+            echo "::warning::Human notification delivery failed; main workflow remains fail-open"
+          fi
